@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class VlessNode:
@@ -20,6 +20,28 @@ class VlessNode:
     host: str = ""
 
 @dataclass
+class LabelEvidence:
+    label: str
+    confidence: float
+
+@dataclass
+class ApiVerdict:
+    source: str
+    network_labels: list[LabelEvidence] = field(default_factory=list)
+    risk_labels: list[LabelEvidence] = field(default_factory=list)
+    risk_score: float | None = None
+    raw_summary: str = ""
+
+@dataclass
+class NodeProfile:
+    display_labels: list[str] = field(default_factory=lambda: ["未知"])
+    network_labels: list[LabelEvidence] = field(default_factory=list)
+    risk_labels: list[LabelEvidence] = field(default_factory=list)
+    risk_score: float = 0.0
+    confidence: str = "low"
+    evidence: list[ApiVerdict] = field(default_factory=list)
+
+@dataclass
 class ProbeData:
     tcp_ping_ms: float
     ttfb_ms: float
@@ -35,6 +57,7 @@ class ProbeData:
     is_detour: bool = False
     is_backbone: bool = False
     backbone_info: str = ""
+    profile: NodeProfile = field(default_factory=NodeProfile)
 
 @dataclass
 class AnalyzedNode:

@@ -131,6 +131,70 @@ class ApiStore:
             conn.close()
 
     @classmethod
+    def update_subscription(
+        cls,
+        subscription_id: str,
+        *,
+        name: str | None = None,
+        url: str | None = None,
+    ) -> dict | None:
+        cls.init_db()
+        updates = []
+        values = []
+        if name is not None:
+            updates.append("name = ?")
+            values.append(name)
+        if url is not None:
+            updates.append("url = ?")
+            values.append(url)
+        if not updates:
+            return cls.get_subscription(subscription_id)
+
+        updates.append("updated_at = ?")
+        values.append(cls.now())
+        values.append(subscription_id)
+        with cls._write_lock:
+            conn = cls.connect()
+            try:
+                conn.execute(
+                    f"UPDATE subscriptions SET {', '.join(updates)} WHERE id = ?",
+                    values,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return cls.get_subscription(subscription_id)
+
+    @classmethod
+    def delete_subscription(cls, subscription_id: str) -> bool:
+        cls.init_db()
+        with cls._write_lock:
+            conn = cls.connect()
+            try:
+                existing = conn.execute(
+                    "SELECT id FROM subscriptions WHERE id = ?",
+                    (subscription_id,),
+                ).fetchone()
+                if not existing:
+                    return False
+                conn.execute(
+                    "DELETE FROM subscription_results WHERE subscription_id = ?",
+                    (subscription_id,),
+                )
+                conn.execute(
+                    "DELETE FROM refresh_jobs WHERE subscription_id = ?",
+                    (subscription_id,),
+                )
+                conn.execute(
+                    "DELETE FROM subscriptions WHERE id = ?",
+                    (subscription_id,),
+                )
+                conn.commit()
+                return True
+            finally:
+                conn.close()
+
+    @classmethod
     def list_subscriptions(cls) -> list[dict]:
         cls.init_db()
         conn = cls.connect()

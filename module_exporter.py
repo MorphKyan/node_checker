@@ -22,6 +22,20 @@ class ResultExporter:
         return re.sub(r'[\\/*?:"<>|]', "_", name)
 
     @staticmethod
+    def format_profile_labels(profile) -> str:
+        return "/".join(profile.display_labels) if profile.display_labels else "未知"
+
+    @staticmethod
+    def format_profile_evidence(profile) -> str:
+        if not profile.evidence:
+            return "No evidence"
+        parts = []
+        for verdict in profile.evidence:
+            summary = verdict.raw_summary or "No signal"
+            parts.append(f"{verdict.source}: {summary}")
+        return " | ".join(parts)
+
+    @staticmethod
     def export_markdown_report(nodes: list[TestedNode], base_dir: str = "result"):
         import shutil
         if os.path.exists(base_dir):
@@ -45,7 +59,7 @@ class ResultExporter:
             reverse=True
         )
         
-        headers = ["Status", "Remark", "Actual IP", "Geo", "Ping(ms)", "TTFB(ms)", "Speed(Mbps)", "Detour", "Backbone", "Score", "Reject Reason"]
+        headers = ["Status", "Remark", "Profile", "Actual IP", "Geo", "Ping(ms)", "TTFB(ms)", "Speed(Mbps)", "Detour", "Backbone", "Score", "Reject Reason"]
         rows = []
         
         for tn in sorted_nodes:
@@ -58,13 +72,12 @@ class ResultExporter:
             geo = str(probe.actual_geo)
             remark = str(an.node.remark)[:40]
             actual_ip = str(probe.actual_ip)
-            
-            speed = f"{tn.download_speed_mbps:.2f}"
+            profile = ResultExporter.format_profile_labels(probe.profile)
             
             speed = f"{tn.download_speed_mbps:.2f}"
             
             rows.append([
-                status, remark, actual_ip, geo, ping, ttfb, speed,
+                status, remark, profile, actual_ip, geo, ping, ttfb, speed,
                 "Yes" if probe.is_detour else "No",
                 "Yes" if probe.is_backbone else "No",
                 score, str(an.reject_reason)
@@ -119,6 +132,12 @@ class ResultExporter:
 - **IPWhoIs**: `{probe.ipwhois_info}`
 - **IPApi**: `{probe.ipapi_info}`
 - **Scamalytics**: `{probe.scamalytics_info}`
+
+### Node Profile
+- **Labels**: `{ResultExporter.format_profile_labels(probe.profile)}`
+- **Risk Score**: `{probe.profile.risk_score:.1f}`
+- **Confidence**: `{probe.profile.confidence}`
+- **Evidence**: `{ResultExporter.format_profile_evidence(probe.profile)}`
 
 ## 3. Analysis & Scoring
 - **Is Valid**: `{an.is_valid}`

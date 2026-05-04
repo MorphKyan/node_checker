@@ -1,0 +1,190 @@
+import unittest
+from pathlib import Path
+
+from models import AnalyzedNode, ProbeData, TestedNode, VlessNode
+from module_exporter import ResultExporter
+from module_profile import ProfileAdapters, NodeProfileAggregator
+
+
+class ProfileAdapterTests(unittest.TestCase):
+    def test_ipwhois_vpn_hosting(self):
+        verdict = ProfileAdapters.from_ipwhois({
+            "success": True,
+            "security": {
+                "proxy": False,
+                "vpn": True,
+                "tor": False,
+                "hosting": True,
+            },
+        })
+
+        self.assertEqual([item.label for item in verdict.network_labels], ["hosting"])
+        self.assertEqual([item.label for item in verdict.risk_labels], ["vpn"])
+        self.assertGreaterEqual(verdict.risk_score, 70)
+
+    def test_ipapi_company_type_does_not_turn_clean_into_residential(self):
+        verdict = ProfileAdapters.from_ipapi({
+            "is_proxy": False,
+            "is_vpn": False,
+            "is_tor": False,
+            "is_datacenter": False,
+            "is_abuser": False,
+            "company": {"type": "isp"},
+        })
+
+        self.assertEqual([item.label for item in verdict.network_labels], ["likely_residential"])
+        self.assertEqual([item.label for item in verdict.risk_labels], ["clean"])
+
+    def test_scamalytics_datacenter_proxy(self):
+        verdict = ProfileAdapters.from_scamalytics({
+            "scamalytics": {
+                "scamalytics_score": 82,
+                "scamalytics_risk": "high",
+                "scamalytics_proxy": {
+                    "is_datacenter": True,
+                    "is_public_proxy": True,
+                },
+            },
+        })
+
+        self.assertEqual([item.label for item in verdict.network_labels], ["datacenter"])
+        self.assertEqual([item.label for item in verdict.risk_labels], ["proxy"])
+        self.assertEqual(verdict.risk_score, 82)
+
+    def test_failed_api_returns_no_effective_labels(self):
+        verdict = ProfileAdapters.from_ipwhois(None)
+
+        self.assertEqual(verdict.network_labels, [])
+        self.assertEqual(verdict.risk_labels, [])
+
+
+class NodeProfileAggregatorTests(unittest.TestCase):
+    def test_datacenter_vpn_compound_label(self):
+        profile = NodeProfileAggregator.aggregate([
+            ProfileAdapters.from_ipapi({
+                "is_datacenter": True,
+                "is_vpn": True,
+                "company": {"type": "hosting"},
+            }),
+            ProfileAdapters.from_scamalytics({
+                "scamalytics": {
+                    "scamalytics_score": 74,
+                    "scamalytics_risk": "medium",
+                    "scamalytics_proxy": {
+                        "is_datacenter": True,
+                        "is_vpn": True,
+                    },
+                },
+            }),
+        ])
+
+        self.assertIn("机房", profile.display_labels)
+        self.assertIn("VPN", profile.display_labels)
+        self.assertNotIn("Clean", profile.display_labels)
+        self.assertEqual(profile.confidence, "high")
+
+    def test_hosting_proxy_compound_label(self):
+        profile = NodeProfileAggregator.aggregate([
+            ProfileAdapters.from_ipwhois({
+                "success": True,
+                "security": {
+                    "hosting": True,
+                    "proxy": True,
+                    "vpn": False,
+                    "tor": False,
+                },
+            }),
+        ])
+
+        self.assertEqual(profile.display_labels, ["托管机房", "Proxy"])
+
+    def test_clean_only_does_not_become_residential(self):
+        profile = NodeProfileAggregator.aggregate([
+            ProfileAdapters.from_ipwhois({
+                "success": True,
+                "security": {
+                    "hosting": False,
+                    "proxy": False,
+                    "vpn": False,
+                    "tor": False,
+                },
+            }),
+        ])
+
+        self.assertEqual(profile.display_labels, ["Clean"])
+        self.assertEqual(profile.network_labels, [])
+
+    def test_weak_residential_evidence_is_likely_residential(self):
+        profile = NodeProfileAggregator.aggregate([
+            ProfileAdapters.from_ipapi({
+                "is_proxy": False,
+                "is_vpn": False,
+                "is_tor": False,
+                "is_datacenter": False,
+                "is_abuser": False,
+                "company": {"type": "isp"},
+            }),
+        ])
+
+        self.assertIn("疑似家宽", profile.display_labels)
+        self.assertNotIn("家宽", profile.display_labels)
+
+    def test_no_successful_evidence_is_unknown(self):
+        profile = NodeProfileAggregator.aggregate([
+            ProfileAdapters.from_ipwhois(None),
+            ProfileAdapters.from_ipapi(None),
+            ProfileAdapters.from_scamalytics(None),
+        ])
+
+        self.assertEqual(profile.display_labels, ["未知"])
+        self.assertEqual(profile.confidence, "low")
+
+
+class ProfileExportIntegrationTests(unittest.TestCase):
+    def test_markdown_report_contains_profile(self):
+        profile = NodeProfileAggregator.aggregate([
+            ProfileAdapters.from_ipwhois({
+                "success": True,
+                "security": {
+                    "hosting": True,
+                    "proxy": True,
+                    "vpn": False,
+                    "tor": False,
+                },
+            }),
+        ])
+        node = VlessNode(
+            raw_uri="vless://uuid@example.com:443?security=tls#JP",
+            uuid="uuid",
+            server_ip="example.com",
+            server_port=443,
+            remark="JP",
+            expected_geo="JP",
+        )
+        probe = ProbeData(
+            tcp_ping_ms=80.0,
+            ttfb_ms=210.0,
+            actual_ip="203.0.113.10",
+            actual_geo="JP",
+            asn_org="Example ASN",
+            fraud_score=20,
+            profile=profile,
+        )
+        tested = TestedNode(
+            AnalyzedNode(node, probe, True, 90.0, "", "test score"),
+            123.45,
+        )
+
+        base_dir = Path("result/test_profile_report")
+        ResultExporter.export_markdown_report([tested], base_dir=str(base_dir))
+        report = Path(base_dir, "report.md").read_text(encoding="utf-8")
+        detail = next(Path(base_dir, "node_details").glob("*.md")).read_text(encoding="utf-8")
+
+        self.assertIn("Profile", report)
+        self.assertIn("托管机房/Proxy", report)
+        self.assertIn("### Node Profile", detail)
+        self.assertIn("ipwho.is: hosting=true, proxy=true", detail)
+
+
+if __name__ == "__main__":
+    unittest.main()

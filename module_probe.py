@@ -5,6 +5,7 @@ import aiohttp
 from models import VlessNode, ProbeData
 from settings import settings
 import json
+from module_profile import ProfileAdapters, NodeProfileAggregator
 
 class LightweightProbe:
     _ip_cache = {}
@@ -39,7 +40,7 @@ class LightweightProbe:
                 return await resp.json()
 
     @staticmethod
-    async def fetch_ipapi(ip: str) -> str:
+    async def fetch_ipapi(ip: str) -> tuple[str, dict | None]:
         url = settings.IPAPI_API.format(ip=ip)
         try:
             async with aiohttp.ClientSession() as session:
@@ -54,15 +55,15 @@ class LightweightProbe:
                         if data.get("is_abuser"): info.append("Abuser")
                         company_type = data.get("company", {}).get("type", "")
                         if company_type: info.append(f"Type:{company_type}")
-                        return ", ".join(info) if info else "Clean"
-                    return f"Error: {resp.status}"
+                        return ", ".join(info) if info else "Clean", data
+                    return f"Error: {resp.status}", None
         except asyncio.TimeoutError:
-            return "Timeout"
+            return "Timeout", None
         except Exception as e:
-            return f"Error"
+            return "Error", None
 
     @staticmethod
-    async def fetch_scamalytics(ip: str) -> str:
+    async def fetch_scamalytics(ip: str) -> tuple[str, dict | None]:
         url = settings.SCAMALYTICS_API.format(ip=ip)
         try:
             async with aiohttp.ClientSession() as session:
@@ -92,14 +93,14 @@ class LightweightProbe:
                                 info.append(f"Score: {score}")
                                 info.append(f"Risk: {risk}")
                                 
-                            return ", ".join(info)
+                            return ", ".join(info), data
                         except json.JSONDecodeError:
-                            return text.strip()[:100]
-                    return f"Error: {resp.status}"
+                            return text.strip()[:100], None
+                    return f"Error: {resp.status}", None
         except asyncio.TimeoutError:
-            return "Timeout"
+            return "Timeout", None
         except Exception as e:
-            return f"Error"
+            return "Error", None
 
     @staticmethod
     async def test_ttfb(socks5_url: str, target_url: str, times: int = None) -> float:
@@ -258,10 +259,14 @@ class LightweightProbe:
         ipwhois_info = ""
         ipapi_info = ""
         scamalytics_info = ""
+        ipwhois_data = None
+        ipapi_data = None
+        scamalytics_data = None
 
         try:
             ip_info = await LightweightProbe.fetch_ip_info(socks5_url)
             if ip_info.get("success") == True:
+                ipwhois_data = ip_info
                 actual_ip = ip_info.get("ip", "")
                 actual_geo = ip_info.get("country_code", "Unknown")
                 connection = ip_info.get("connection", {})
@@ -289,8 +294,8 @@ class LightweightProbe:
                     ipapi_task = asyncio.create_task(LightweightProbe.fetch_ipapi(actual_ip))
                     scam_task = asyncio.create_task(LightweightProbe.fetch_scamalytics(actual_ip))
                     
-                    ipapi_info = await ipapi_task
-                    scamalytics_info = await scam_task
+                    ipapi_info, ipapi_data = await ipapi_task
+                    scamalytics_info, scamalytics_data = await scam_task
         except asyncio.TimeoutError:
             print(f"[{node.remark}] IPWhoIs Error: Timeout")
             ipwhois_info = "Timeout"
@@ -301,6 +306,11 @@ class LightweightProbe:
         tcp_ping_ms = await tcp_ping_task
         
         trace_path, is_detour, is_backbone, backbone_info = await trace_task
+        profile = NodeProfileAggregator.aggregate([
+            ProfileAdapters.from_ipwhois(ipwhois_data),
+            ProfileAdapters.from_ipapi(ipapi_data),
+            ProfileAdapters.from_scamalytics(scamalytics_data),
+        ])
         
         return ProbeData(
             tcp_ping_ms=tcp_ping_ms,
@@ -316,5 +326,6 @@ class LightweightProbe:
             trace_path=trace_path,
             is_detour=is_detour,
             is_backbone=is_backbone,
-            backbone_info=backbone_info
+            backbone_info=backbone_info,
+            profile=profile
         )

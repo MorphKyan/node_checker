@@ -46,6 +46,12 @@ class Config:
     SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH = 64
     SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH = 96
 
+    # 本地 API 服务
+    API_DB_PATH = "data/api.sqlite3"
+    API_HOST = "127.0.0.1"
+    API_PORT = 8000
+    API_DEFAULT_SPEEDTEST_LIMIT = 3
+
     @classmethod
     def load_from_file(cls, filepath="config.json"):
         if os.path.exists(filepath):

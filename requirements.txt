@@ -1,2 +1,6 @@
 httpx[http2]
 httpx-socks[asyncio]
+aiohttp
+aiohttp-socks
+fastapi
+uvicorn[standard]

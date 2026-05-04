@@ -33,6 +33,12 @@ class Config:
     FRAUD_SCORE_TOLERANCE = 75
     MIN_TOTAL_SCORE = 50.0
 
+    # 本地探测结果缓存
+    CACHE_ENABLED = True
+    CACHE_DB_PATH = "cache/probe_cache.sqlite3"
+    PROBE_CACHE_TTL_SECONDS = 24 * 60 * 60
+    CACHE_FAILURE_RESULTS = False
+
     @classmethod
     def load_from_file(cls, filepath="config.json"):
         if os.path.exists(filepath):

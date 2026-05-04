@@ -5,9 +5,12 @@ venv/
 .venv/
 
 result/
+cache/
 sing-box.exe
 sing-box-latest.zip
 singbox_*.json
+*.sqlite3
+*.db
 
 *.log
 *.tmp

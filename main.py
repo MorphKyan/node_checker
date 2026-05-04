@@ -7,6 +7,7 @@ from module_tunnel import TunnelController
 from module_probe import LightweightProbe
 from module_analyzer import NodeAnalyzer
 from module_exporter import ResultExporter
+from module_cache import ProbeCache
 from models import TestedNode, AnalyzedNode
 
 async def process_node_filter(node, local_port: int, sem: asyncio.Semaphore):
@@ -14,9 +15,15 @@ async def process_node_filter(node, local_port: int, sem: asyncio.Semaphore):
         process = None
         config_path = None
         try:
+            cached_probe = await ProbeCache.get(node)
+            if cached_probe is not None:
+                print(f"[Cache Hit] {node.remark}")
+                return NodeAnalyzer.analyze(node, cached_probe)
+
             process, config_path = await TunnelController.start_tunnel(node, local_port)
             socks5_url = f"socks5://127.0.0.1:{local_port}"
             probe_data = await LightweightProbe.run_probe(node, socks5_url)
+            await ProbeCache.set(node, probe_data)
             analyzed = NodeAnalyzer.analyze(node, probe_data)
             return analyzed
         except Exception as e:
@@ -30,6 +37,7 @@ async def process_node_filter(node, local_port: int, sem: asyncio.Semaphore):
 
 async def main():
     setup_singbox()
+    await ProbeCache.init_db()
     
     sub_url = input("Enter subscription URL or file path (leave empty for inputs/test.txt): ").strip()
     if not sub_url:

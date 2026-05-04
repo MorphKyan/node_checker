@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+
+venv/
+.venv/
+
+result/
+sing-box.exe
+sing-box-latest.zip
+singbox_*.json
+
+*.log
+*.tmp

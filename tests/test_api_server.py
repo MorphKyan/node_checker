@@ -59,8 +59,12 @@ class ApiServerTests(unittest.TestCase):
         self.original_api_db_path = settings.API_DB_PATH
         self.original_cache_db_path = settings.CACHE_DB_PATH
         self.original_cache_enabled = settings.CACHE_ENABLED
+        self.original_runtime_settings_path = settings.RUNTIME_SETTINGS_PATH
+        self.original_filter_concurrency = settings.FILTER_CONCURRENCY
+        self.original_speedtest_limit = settings.API_DEFAULT_SPEEDTEST_LIMIT
         settings.API_DB_PATH = str(Path(self.tmpdir.name, "api.sqlite3"))
         settings.CACHE_DB_PATH = str(Path(self.tmpdir.name, "probe_cache.sqlite3"))
+        settings.RUNTIME_SETTINGS_PATH = str(Path(self.tmpdir.name, "runtime_settings.json"))
         settings.CACHE_ENABLED = True
         ApiStore._initialized_paths.clear()
         self.run_job_patch = patch(
@@ -76,6 +80,9 @@ class ApiServerTests(unittest.TestCase):
         settings.API_DB_PATH = self.original_api_db_path
         settings.CACHE_DB_PATH = self.original_cache_db_path
         settings.CACHE_ENABLED = self.original_cache_enabled
+        settings.RUNTIME_SETTINGS_PATH = self.original_runtime_settings_path
+        settings.FILTER_CONCURRENCY = self.original_filter_concurrency
+        settings.API_DEFAULT_SPEEDTEST_LIMIT = self.original_speedtest_limit
         ApiStore._initialized_paths.clear()
         self.tmpdir.cleanup()
 
@@ -110,6 +117,29 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload[0]["id"], subscription["id"])
         self.assertEqual(payload[0]["node_count"], 1)
         self.assertEqual(payload[0]["valid_count"], 1)
+        self.assertIn("last_job_id", payload[0])
+
+    def test_get_update_and_delete_subscription(self):
+        subscription = self.create_subscription_without_refresh()
+        self.save_result(subscription["id"])
+
+        get_response = self.client.get(f"/subscriptions/{subscription['id']}")
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(get_response.json()["node_count"], 1)
+
+        patch_response = self.client.patch(
+            f"/subscriptions/{subscription['id']}",
+            json={"name": "renamed", "url": "https://example.com/next"},
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["name"], "renamed")
+        self.assertEqual(patch_response.json()["url"], "https://example.com/next")
+
+        delete_response = self.client.delete(f"/subscriptions/{subscription['id']}")
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json()["deleted"], True)
+        self.assertEqual(self.client.get(f"/subscriptions/{subscription['id']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/subscriptions/{subscription['id']}/results").status_code, 404)
 
     def test_refresh_supports_speedtest_limit_and_force_probe(self):
         subscription = self.create_subscription_without_refresh()
@@ -187,6 +217,48 @@ class ApiServerTests(unittest.TestCase):
     def test_missing_resources_return_404(self):
         self.assertEqual(self.client.get("/subscriptions/sub_missing/results").status_code, 404)
         self.assertEqual(self.client.get("/jobs/job_missing").status_code, 404)
+
+    def test_settings_can_be_read_and_updated(self):
+        get_response = self.client.get("/settings")
+        self.assertEqual(get_response.status_code, 200)
+        self.assertIn("FILTER_CONCURRENCY", get_response.json())
+
+        patch_response = self.client.patch(
+            "/settings",
+            json={"FILTER_CONCURRENCY": 7, "API_DEFAULT_SPEEDTEST_LIMIT": 0},
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        payload = patch_response.json()
+        self.assertEqual(payload["FILTER_CONCURRENCY"], 7)
+        self.assertEqual(payload["API_DEFAULT_SPEEDTEST_LIMIT"], 0)
+        self.assertEqual(settings.FILTER_CONCURRENCY, 7)
+
+        runtime_file = Path(settings.RUNTIME_SETTINGS_PATH)
+        self.assertTrue(runtime_file.exists())
+
+    def test_invalid_setting_value_returns_422(self):
+        response = self.client.patch("/settings", json={"FILTER_CONCURRENCY": 0})
+        self.assertEqual(response.status_code, 422)
+
+    def test_static_frontend_fallback_returns_index_when_dist_exists(self):
+        dist = Path("frontend", "dist")
+        index = dist / "index.html"
+        original_text = index.read_text(encoding="utf-8") if index.exists() else None
+        try:
+            dist.mkdir(parents=True, exist_ok=True)
+            index.write_text("<html><body>frontend-shell</body></html>", encoding="utf-8")
+            response = self.client.get("/")
+            nested = self.client.get("/nodes/sub_123")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("frontend-shell", response.text)
+            self.assertEqual(nested.status_code, 200)
+            self.assertIn("frontend-shell", nested.text)
+        finally:
+            if original_text is None:
+                if index.exists():
+                    index.unlink()
+            else:
+                index.write_text(original_text, encoding="utf-8")
 
 
 if __name__ == "__main__":

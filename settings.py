@@ -51,6 +51,7 @@ class Config:
     API_HOST = "127.0.0.1"
     API_PORT = 8000
     API_DEFAULT_SPEEDTEST_LIMIT = 3
+    RUNTIME_SETTINGS_PATH = "data/runtime_settings.json"
 
     @classmethod
     def load_from_file(cls, filepath="config.json"):

@@ -39,6 +39,13 @@ class Config:
     PROBE_CACHE_TTL_SECONDS = 24 * 60 * 60
     CACHE_FAILURE_RESULTS = False
 
+    # 增强订阅导出
+    SUBSCRIPTION_EXPORT_ENABLED = True
+    SUBSCRIPTION_EXPORT_DIR = "result/subscriptions"
+    SUBSCRIPTION_EXPORT_VALID_ONLY = True
+    SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH = 64
+    SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH = 96
+
     @classmethod
     def load_from_file(cls, filepath="config.json"):
         if os.path.exists(filepath):

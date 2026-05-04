@@ -8,6 +8,7 @@ from module_probe import LightweightProbe
 from module_analyzer import NodeAnalyzer
 from module_exporter import ResultExporter
 from module_cache import ProbeCache
+from module_subscription_exporter import SubscriptionExporter
 from models import TestedNode, AnalyzedNode
 
 async def process_node_filter(node, local_port: int, sem: asyncio.Semaphore):
@@ -112,6 +113,14 @@ async def main():
         tested_nodes.append(TestedNode(n, 0.0))
             
     ResultExporter.export_markdown_report(tested_nodes)
+    if settings.SUBSCRIPTION_EXPORT_ENABLED:
+        SubscriptionExporter.export_enhanced_subscriptions(
+            tested_nodes,
+            output_dir=settings.SUBSCRIPTION_EXPORT_DIR,
+            valid_only=settings.SUBSCRIPTION_EXPORT_VALID_ONLY,
+            compact_max_length=settings.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH,
+            detailed_max_length=settings.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH,
+        )
     print("All tasks completed.")
 
 if __name__ == "__main__":

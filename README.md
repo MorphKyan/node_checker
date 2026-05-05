@@ -79,7 +79,7 @@ SG
   -> 解析 VLESS URI
   -> 为每个节点启动临时 sing-box 隧道
   -> 检测 TCP Ping、TTFB、出口 IP、地区、ASN、路由
-  -> 查询 ipwho.is、ipapi.is、Scamalytics
+  -> 查询 ipwho.is、ipapi.is、Scamalytics、proxycheck.io、Abstract API、IP2Location.io
   -> 聚合 NodeProfile 网络标签、类型标签、风险分和置信度
   -> 计算总分并筛选有效节点
   -> 对 Top-N 有效节点测速
@@ -108,11 +108,14 @@ python -m pip install -r requirements.txt
 
 ## 可选 API 配置
 
-默认会查询 `ipwho.is`，并在未配置密钥时跳过需要专用凭据的 Scamalytics。需要启用更多 IP 情报源时，通过环境变量配置，不要把密钥写入仓库：
+默认会查询 `ipwho.is`、免 key 的 `proxycheck.io` 和 keyless `IP2Location.io`。需要启用更多 IP 情报源时，通过环境变量配置，不要把密钥写入仓库：
 
 ```powershell
 $env:IPAPI_KEY="your-ipapi-key"
 $env:SCAMALYTICS_API="https://api13.scamalytics.com/v3/<account>/?key=<key>&ip={ip}"
+$env:ABSTRACT_API_KEY="your-abstract-api-key"
+$env:IP2LOCATION_KEY="your-ip2location-key"
+$env:PROXYCHECK_KEY="your-proxycheck-key"
 ```
 
 ## CLI 使用

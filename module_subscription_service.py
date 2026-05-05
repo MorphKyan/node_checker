@@ -24,7 +24,7 @@ class SubscriptionRefreshService:
 
     @staticmethod
     async def fetch_subscription_text(source: str) -> str:
-        if source.startswith("http"):
+        if VlessParser.is_http_source(source):
             return await VlessParser.fetch_subscription(source)
         if os.path.exists(source):
             with open(source, "r", encoding="utf-8") as f:

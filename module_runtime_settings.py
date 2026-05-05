@@ -85,10 +85,14 @@ class RuntimeSettings:
 
     @classmethod
     def apply(cls, data: dict[str, Any], *, persist: bool = True) -> dict[str, Any]:
+        validated = {}
         for key, value in data.items():
             if key not in EDITABLE_SETTINGS:
                 continue
-            setattr(settings, key, cls.validate_value(key, value))
+            validated[key] = cls.validate_value(key, value)
+
+        for key, value in validated.items():
+            setattr(settings, key, value)
 
         current = cls.get_editable()
         if persist:

@@ -30,7 +30,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { createApiClient, enhancedUrl } from "./api";
+import { ApiError, createApiClient, enhancedUrl } from "./api";
 import { useAppData } from "./appData";
 import { duration, formatTime, groupCount, scoreBuckets, statusTone } from "./appUtils";
 import { filterNodes } from "./nodeFilters";
@@ -73,6 +73,12 @@ function downloadText(filename: string, text: string): void {
   URL.revokeObjectURL(link.href);
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return `${error.status}: ${error.message}`;
+  if (error instanceof Error) return error.message;
+  return "操作失败";
+}
+
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [preferences, setPreferencesState] = useState<LocalPreferences>(() => loadPreferences());
@@ -96,6 +102,7 @@ export default function App() {
   const [customSpeedLimit, setCustomSpeedLimit] = useState(3);
   const [subscriptionForm, setSubscriptionForm] = useState({ name: "", url: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState("");
 
   const queryClient = useQueryClient();
   const api = useMemo(() => createApiClient(preferences.apiBaseUrl), [preferences.apiBaseUrl]);
@@ -130,37 +137,45 @@ export default function App() {
   const createSubscription = useMutation({
     mutationFn: api.createSubscription,
     onSuccess: (response) => {
+      setOperationError("");
       setSubscriptionForm({ name: "", url: "" });
       setSelectedSubscriptionId(response.subscription_id);
       setView("jobs");
       void queryClient.invalidateQueries();
     },
+    onError: (error) => setOperationError(errorMessage(error)),
   });
 
   const updateSubscription = useMutation({
     mutationFn: ({ id, input }: { id: string; input: { name?: string; url?: string } }) => api.updateSubscription(id, input),
     onSuccess: () => {
+      setOperationError("");
       setEditingId(null);
       setSubscriptionForm({ name: "", url: "" });
       void queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     },
+    onError: (error) => setOperationError(errorMessage(error)),
   });
 
   const deleteSubscription = useMutation({
     mutationFn: api.deleteSubscription,
     onSuccess: () => {
+      setOperationError("");
       setSelectedSubscriptionId("");
       void queryClient.invalidateQueries();
     },
+    onError: (error) => setOperationError(errorMessage(error)),
   });
 
   const refreshSubscription = useMutation({
     mutationFn: ({ id, speedtest_limit, force_probe }: { id: string; speedtest_limit?: number; force_probe?: boolean }) =>
       api.refreshSubscription(id, { speedtest_limit, force_probe }),
     onSuccess: () => {
+      setOperationError("");
       setView("jobs");
       void queryClient.invalidateQueries();
     },
+    onError: (error) => setOperationError(errorMessage(error)),
   });
 
   const settingsQuery = useQuery({
@@ -171,8 +186,10 @@ export default function App() {
   const updateSettings = useMutation({
     mutationFn: api.updateSettings,
     onSuccess: () => {
+      setOperationError("");
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
+    onError: (error) => setOperationError(errorMessage(error)),
   });
 
   function setPreferences(next: LocalPreferences) {
@@ -182,12 +199,17 @@ export default function App() {
 
   async function previewExport() {
     if (!effectiveSubscriptionId) return;
-    const content = await api.getEnhanced(effectiveSubscriptionId, {
-      mode: exportMode,
-      format: exportFormat,
-      valid_only: exportValidOnly,
-    });
-    setExportPreview(content);
+    try {
+      const content = await api.getEnhanced(effectiveSubscriptionId, {
+        mode: exportMode,
+        format: exportFormat,
+        valid_only: exportValidOnly,
+      });
+      setOperationError("");
+      setExportPreview(content);
+    } catch (error) {
+      setOperationError(errorMessage(error));
+    }
   }
 
   const geoOptions = Array.from(new Set((selectedResult?.nodes || []).map((node) => node.probe.actual_geo).filter(Boolean)));
@@ -238,6 +260,12 @@ export default function App() {
         </header>
 
         <div className="space-y-5 p-6">
+          {operationError && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {operationError}
+            </div>
+          )}
+
           {view === "dashboard" && (
             <Dashboard
               subscriptions={subscriptionList}
@@ -256,7 +284,7 @@ export default function App() {
               editingId={editingId}
               customSpeedLimit={customSpeedLimit}
               onFormChange={setSubscriptionForm}
-              onCustomSpeedLimit={setCustomSpeedLimit}
+              onCustomSpeedLimit={(value) => setCustomSpeedLimit(Math.max(0, Math.min(100, value)))}
               onCreate={() => createSubscription.mutate(subscriptionForm)}
               onStartEdit={(subscription) => {
                 setEditingId(subscription.id);
@@ -447,6 +475,7 @@ function SubscriptionsView(props: {
   onOpenNodes: (id: string) => void;
   onOpenExport: (id: string) => void;
 }) {
+  const invalidCustomSpeedLimit = !Number.isInteger(props.customSpeedLimit) || props.customSpeedLimit < 0 || props.customSpeedLimit > 100;
   return (
     <div className="space-y-4">
       <Panel>
@@ -464,7 +493,7 @@ function SubscriptionsView(props: {
           <div className="text-sm font-semibold text-slate-900">订阅列表</div>
           <div className="flex items-center gap-2">
             <Label>自定义测速数量</Label>
-            <Input className="w-20" type="number" min={0} value={props.customSpeedLimit} onChange={(event) => props.onCustomSpeedLimit(Number(event.target.value))} />
+            <Input className="w-20" type="number" min={0} max={100} step={1} value={props.customSpeedLimit} onChange={(event) => props.onCustomSpeedLimit(Number(event.target.value))} />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -492,9 +521,9 @@ function SubscriptionsView(props: {
                   <td className="px-3 py-3">
                     <div className="flex flex-wrap gap-2">
                       <Button variant="secondary" onClick={() => props.onRefresh(subscription.id)}>刷新</Button>
-                      <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, props.customSpeedLimit, false)}>自定义</Button>
+                      <Button variant="secondary" disabled={invalidCustomSpeedLimit} onClick={() => props.onRefresh(subscription.id, props.customSpeedLimit, false)}>自定义</Button>
                       <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, 0, false)}>不测速</Button>
-                      <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, props.customSpeedLimit, true)}>强制</Button>
+                      <Button variant="secondary" disabled={invalidCustomSpeedLimit} onClick={() => props.onRefresh(subscription.id, props.customSpeedLimit, true)}>强制</Button>
                       <Button variant="ghost" onClick={() => props.onStartEdit(subscription)}>编辑</Button>
                       <Button variant="ghost" onClick={() => props.onOpenNodes(subscription.id)}>节点</Button>
                       <Button variant="ghost" onClick={() => props.onOpenExport(subscription.id)}>导出</Button>
@@ -671,6 +700,7 @@ function ExportView(props: {
 function SettingsView({ settings, preferences, onSaveSettings, onPreferences, onReset }: { settings?: RuntimeSettings; preferences: LocalPreferences; onSaveSettings: (settings: Partial<RuntimeSettings>) => void; onPreferences: (preferences: LocalPreferences) => void; onReset: () => void }) {
   const [draft, setDraft] = useState<Partial<RuntimeSettings>>({});
   const current = { ...(settings || {}), ...draft } as RuntimeSettings;
+  const hasDraft = Object.keys(draft).length > 0;
   return (
     <div className="grid grid-cols-2 gap-4">
       <Panel>
@@ -689,7 +719,7 @@ function SettingsView({ settings, preferences, onSaveSettings, onPreferences, on
             <div><Label>缓存失败结果</Label><Select className="mt-1 w-full" value={String(current.CACHE_FAILURE_RESULTS)} onChange={(event) => setDraft({ ...draft, CACHE_FAILURE_RESULTS: event.target.value === "true" })}><option value="false">关闭</option><option value="true">开启</option></Select></div>
             <div className="col-span-2"><Label>TTFB URL</Label><Input className="mt-1" value={current.TTFB_TARGET_URL || ""} onChange={(event) => setDraft({ ...draft, TTFB_TARGET_URL: event.target.value })} /></div>
             <div className="col-span-2"><Label>测速 URL</Label><Input className="mt-1" value={current.SPEEDTEST_URL || ""} onChange={(event) => setDraft({ ...draft, SPEEDTEST_URL: event.target.value })} /></div>
-            <div className="col-span-2 flex justify-end gap-2"><Button variant="secondary" onClick={() => { setDraft({}); onReset(); }}>重置</Button><Button onClick={() => { onSaveSettings(draft); setDraft({}); }}><Save className="h-4 w-4" />保存设置</Button></div>
+            <div className="col-span-2 flex justify-end gap-2"><Button variant="secondary" onClick={() => { setDraft({}); onReset(); }}>重置</Button><Button disabled={!hasDraft} onClick={() => { if (!hasDraft) return; onSaveSettings(draft); setDraft({}); }}><Save className="h-4 w-4" />保存设置</Button></div>
           </div>
         )}
       </Panel>

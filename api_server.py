@@ -181,10 +181,13 @@ async def get_enhanced_subscription(
 
 @app.get("/subscriptions/{subscription_id}/results")
 async def get_subscription_results(subscription_id: str) -> dict:
+    subscription = ensure_subscription(subscription_id)
     result = latest_result_or_409(subscription_id)
     return {
         "subscription_id": subscription_id,
         "status": "completed",
+        "subscription_status": subscription["last_status"],
+        "last_job_id": subscription["last_job_id"],
         "node_count": result["node_count"],
         "valid_count": result["valid_count"],
         "updated_at": result["updated_at"],

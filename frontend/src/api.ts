@@ -16,6 +16,28 @@ export class ApiError extends Error {
   }
 }
 
+function formatDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          const location = "loc" in item && Array.isArray(item.loc) ? `${item.loc.join(".")}: ` : "";
+          return `${location}${String(item.msg)}`;
+        }
+        return "";
+      })
+      .filter(Boolean);
+    return messages.length ? messages.join("; ") : fallback;
+  }
+  if (detail && typeof detail === "object") {
+    if ("message" in detail && typeof detail.message === "string") return detail.message;
+    if ("msg" in detail && typeof detail.msg === "string") return detail.msg;
+  }
+  return fallback;
+}
+
 export interface ApiClient {
   listSubscriptions(): Promise<SubscriptionSummary[]>;
   getSubscription(id: string): Promise<SubscriptionSummary>;
@@ -49,11 +71,12 @@ async function request<T>(baseUrl: string, path: string, init?: RequestInit): Pr
   });
   if (!response.ok) {
     let message = response.statusText;
+    const errorText = await response.text();
     try {
-      const body = await response.json();
-      message = body.detail || message;
+      const body = JSON.parse(errorText);
+      message = formatDetail(body.detail, message);
     } catch {
-      message = await response.text();
+      message = errorText || message;
     }
     throw new ApiError(response.status, message);
   }

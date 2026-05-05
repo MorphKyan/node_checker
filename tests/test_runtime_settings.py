@@ -80,6 +80,28 @@ class RuntimeSettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.FILTER_CONCURRENCY, self.original_values["FILTER_CONCURRENCY"])
 
+    def test_apply_rejects_invalid_batch_without_partial_update(self):
+        with self.assertRaises(ValueError):
+            RuntimeSettings.apply(
+                {
+                    "FILTER_CONCURRENCY": 7,
+                    "API_DEFAULT_SPEEDTEST_LIMIT": 101,
+                },
+                persist=False,
+            )
+
+        self.assertEqual(settings.FILTER_CONCURRENCY, self.original_values["FILTER_CONCURRENCY"])
+
+    def test_load_rejects_invalid_batch_without_partial_update(self):
+        Path(settings.RUNTIME_SETTINGS_PATH).write_text(
+            '{"FILTER_CONCURRENCY": 7, "API_DEFAULT_SPEEDTEST_LIMIT": 101}',
+            encoding="utf-8",
+        )
+
+        RuntimeSettings.load()
+
+        self.assertEqual(settings.FILTER_CONCURRENCY, self.original_values["FILTER_CONCURRENCY"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,4 +37,41 @@ describe("api client", () => {
     );
     vi.unstubAllGlobals();
   });
+
+  it("formats validation error detail arrays", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      detail: [{ loc: ["body", "speedtest_limit"], msg: "Input should be less than or equal to 100" }],
+    }), {
+      status: 422,
+      statusText: "Unprocessable Entity",
+      headers: { "content-type": "application/json" },
+    })));
+
+    const client = createApiClient("");
+
+    await expect(client.refreshSubscription("sub_1", { speedtest_limit: 101 })).rejects.toThrow(
+      "body.speedtest_limit: Input should be less than or equal to 100",
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("formats object and plain text errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      detail: { message: "Subscription not found" },
+    }), {
+      status: 404,
+      statusText: "Not Found",
+      headers: { "content-type": "application/json" },
+    })));
+
+    const client = createApiClient("");
+    await expect(client.getSubscription("missing")).rejects.toThrow("Subscription not found");
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("upstream failed", {
+      status: 500,
+      statusText: "Server Error",
+    })));
+    await expect(client.getSubscription("missing")).rejects.toThrow("upstream failed");
+    vi.unstubAllGlobals();
+  });
 });

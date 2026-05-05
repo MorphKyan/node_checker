@@ -32,6 +32,16 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(updated["FILTER_CONCURRENCY"], 7)
         self.assertEqual(settings.FILTER_CONCURRENCY, 7)
 
+    def test_get_metadata_exposes_types_and_limits(self):
+        metadata = RuntimeSettings.get_metadata()
+
+        self.assertEqual(metadata["FILTER_CONCURRENCY"]["type"], "int")
+        self.assertEqual(metadata["FILTER_CONCURRENCY"]["min"], 1)
+        self.assertEqual(metadata["FILTER_CONCURRENCY"]["max"], 100)
+        self.assertEqual(metadata["CACHE_ENABLED"]["type"], "bool")
+        self.assertEqual(metadata["TTFB_TARGET_URL"]["type"], "str")
+        self.assertEqual(metadata["TTFB_TARGET_URL"]["min_length"], 1)
+
     def test_apply_rejects_values_outside_runtime_limits(self):
         with self.assertRaises(ValueError):
             RuntimeSettings.apply({"FILTER_CONCURRENCY": 0}, persist=False)

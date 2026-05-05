@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, LabelHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 
 function cn(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(" ");
@@ -48,8 +48,8 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   );
 }
 
-export function Label({ children }: { children: ReactNode }) {
-  return <label className="text-xs font-medium text-slate-600">{children}</label>;
+export function Label({ children, className, ...props }: LabelHTMLAttributes<HTMLLabelElement> & { children: ReactNode }) {
+  return <label className={cn("text-xs font-medium text-slate-600", className)} {...props}>{children}</label>;
 }
 
 export function Panel({ children, className }: { children: ReactNode; className?: string }) {

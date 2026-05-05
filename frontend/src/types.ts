@@ -82,6 +82,15 @@ export interface RuntimeSettings {
   SPEEDTEST_URL: string;
 }
 
+export interface RuntimeSettingMetadata {
+  type: "int" | "bool" | "str";
+  min?: number;
+  max?: number;
+  min_length?: number;
+}
+
+export type RuntimeSettingsMetadata = Partial<Record<keyof RuntimeSettings, RuntimeSettingMetadata>>;
+
 export interface LocalPreferences {
   apiBaseUrl: string;
   autoRefresh: boolean;

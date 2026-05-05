@@ -3,6 +3,7 @@ import type {
   ExportMode,
   JobStatus,
   RuntimeSettings,
+  RuntimeSettingsMetadata,
   SubscriptionResults,
   SubscriptionSummary,
 } from "./types";
@@ -49,6 +50,7 @@ export interface ApiClient {
   getResults(id: string): Promise<SubscriptionResults>;
   getEnhanced(id: string, params: { mode: ExportMode; format: ExportFormat; valid_only: boolean }): Promise<string>;
   getSettings(): Promise<RuntimeSettings>;
+  getSettingsMetadata(): Promise<RuntimeSettingsMetadata>;
   updateSettings(input: Partial<RuntimeSettings>): Promise<RuntimeSettings>;
 }
 
@@ -124,6 +126,7 @@ export function createApiClient(baseUrl: string): ApiClient {
       return request(baseUrl, `/subscriptions/${pathSegment(id)}/enhanced?${query.toString()}`);
     },
     getSettings: () => request(baseUrl, "/settings"),
+    getSettingsMetadata: () => request(baseUrl, "/settings/metadata"),
     updateSettings: (input) =>
       request(baseUrl, "/settings", {
         method: "PATCH",

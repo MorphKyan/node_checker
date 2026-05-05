@@ -363,6 +363,16 @@ class ApiServerTests(unittest.TestCase):
         runtime_file = Path(settings.RUNTIME_SETTINGS_PATH)
         self.assertTrue(runtime_file.exists())
 
+    def test_settings_metadata_returns_editable_limits(self):
+        response = self.client.get("/settings/metadata")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["FILTER_CONCURRENCY"]["type"], "int")
+        self.assertEqual(payload["FILTER_CONCURRENCY"]["min"], 1)
+        self.assertEqual(payload["FILTER_CONCURRENCY"]["max"], 100)
+        self.assertEqual(payload["CACHE_ENABLED"]["type"], "bool")
+
     def test_invalid_setting_value_returns_422(self):
         response = self.client.patch("/settings", json={"FILTER_CONCURRENCY": 0})
         self.assertEqual(response.status_code, 422)

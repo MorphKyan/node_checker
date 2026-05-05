@@ -44,6 +44,16 @@ class RuntimeSettings:
         return {key: getattr(settings, key) for key in EDITABLE_SETTINGS}
 
     @classmethod
+    def get_metadata(cls) -> dict[str, dict[str, Any]]:
+        return {
+            key: {
+                "type": value_type.__name__,
+                **SETTING_LIMITS.get(key, {}),
+            }
+            for key, value_type in EDITABLE_SETTINGS.items()
+        }
+
+    @classmethod
     def load(cls) -> None:
         path = cls.path()
         if not os.path.exists(path):

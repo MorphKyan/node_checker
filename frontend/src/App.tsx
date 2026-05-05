@@ -678,6 +678,7 @@ function SettingsView({ settings, preferences, onSaveSettings, onPreferences, on
         {!settings ? <EmptyState title="设置加载中" /> : (
           <div className="grid grid-cols-2 gap-3">
             <SettingNumber label="过滤并发" value={current.FILTER_CONCURRENCY} onChange={(value) => setDraft({ ...draft, FILTER_CONCURRENCY: value })} />
+            <SettingNumber label="测速并发" value={current.SPEEDTEST_CONCURRENCY} onChange={(value) => setDraft({ ...draft, SPEEDTEST_CONCURRENCY: value })} />
             <SettingNumber label="默认测速数量" value={current.API_DEFAULT_SPEEDTEST_LIMIT} onChange={(value) => setDraft({ ...draft, API_DEFAULT_SPEEDTEST_LIMIT: value })} />
             <SettingNumber label="缓存 TTL 秒" value={current.PROBE_CACHE_TTL_SECONDS} onChange={(value) => setDraft({ ...draft, PROBE_CACHE_TTL_SECONDS: value })} />
             <SettingNumber label="compact 长度" value={current.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: value })} />

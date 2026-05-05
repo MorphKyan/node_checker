@@ -140,6 +140,10 @@ class ApiStore:
         url: str | None = None,
     ) -> dict | None:
         cls.init_db()
+        existing = cls.get_subscription(subscription_id)
+        if not existing:
+            return None
+        url_changed = url is not None and url != existing["url"]
         updates = []
         values = []
         if name is not None:
@@ -151,8 +155,12 @@ class ApiStore:
         if not updates:
             return cls.get_subscription(subscription_id)
 
+        now = cls.now()
+        if url_changed:
+            updates.append("last_status = 'new'")
+            updates.append("last_job_id = NULL")
         updates.append("updated_at = ?")
-        values.append(cls.now())
+        values.append(now)
         values.append(subscription_id)
         with cls._write_lock:
             conn = cls.connect()
@@ -161,10 +169,73 @@ class ApiStore:
                     f"UPDATE subscriptions SET {', '.join(updates)} WHERE id = ?",
                     values,
                 )
+                if url_changed:
+                    conn.execute(
+                        "DELETE FROM subscription_results WHERE subscription_id = ?",
+                        (subscription_id,),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE refresh_jobs
+                        SET status = 'failed',
+                            phase = 'failed',
+                            error = ?,
+                            finished_at = ?
+                        WHERE subscription_id = ?
+                          AND status IN ('queued', 'running')
+                        """,
+                        (
+                            "Subscription URL changed before refresh completed",
+                            now,
+                            subscription_id,
+                        ),
+                    )
                 conn.commit()
             finally:
                 conn.close()
         return cls.get_subscription(subscription_id)
+
+    @classmethod
+    def fail_stale_active_jobs(cls, reason: str) -> int:
+        cls.init_db()
+        now = cls.now()
+        with cls._write_lock:
+            conn = cls.connect()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT id, subscription_id
+                    FROM refresh_jobs
+                    WHERE status IN ('queued', 'running')
+                    """
+                ).fetchall()
+                if not rows:
+                    return 0
+
+                conn.execute(
+                    """
+                    UPDATE refresh_jobs
+                    SET status = 'failed',
+                        phase = 'failed',
+                        error = ?,
+                        finished_at = ?
+                    WHERE status IN ('queued', 'running')
+                    """,
+                    (reason, now),
+                )
+                for row in rows:
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET last_status = 'failed', updated_at = ?
+                        WHERE id = ? AND last_job_id = ?
+                        """,
+                        (now, row["subscription_id"], row["id"]),
+                    )
+                conn.commit()
+                return len(rows)
+            finally:
+                conn.close()
 
     @classmethod
     def delete_subscription(cls, subscription_id: str) -> bool:
@@ -321,7 +392,7 @@ class ApiStore:
                     values,
                 )
                 job = conn.execute(
-                    "SELECT subscription_id, status FROM refresh_jobs WHERE id = ?",
+                    "SELECT id, subscription_id, status FROM refresh_jobs WHERE id = ?",
                     (job_id,),
                 ).fetchone()
                 if job and status is not None:
@@ -329,9 +400,9 @@ class ApiStore:
                         """
                         UPDATE subscriptions
                         SET last_status = ?, updated_at = ?
-                        WHERE id = ?
+                        WHERE id = ? AND last_job_id = ?
                         """,
-                        (status, cls.now(), job["subscription_id"]),
+                        (status, cls.now(), job["subscription_id"], job["id"]),
                     )
                 conn.commit()
             finally:
@@ -369,6 +440,85 @@ class ApiStore:
                     (now, subscription_id),
                 )
                 conn.commit()
+            finally:
+                conn.close()
+
+    @classmethod
+    def save_results_if_current(
+        cls,
+        subscription_id: str,
+        job_id: str,
+        expected_url: str,
+        nodes: list[TestedNode],
+    ) -> bool:
+        cls.init_db()
+        payload = tested_nodes_to_json(nodes)
+        node_count = len(nodes)
+        valid_count = sum(1 for node in nodes if node.analyzed_node.is_valid)
+        now = cls.now()
+        with cls._write_lock:
+            conn = cls.connect()
+            try:
+                subscription = conn.execute(
+                    """
+                    SELECT id, url, last_job_id
+                    FROM subscriptions
+                    WHERE id = ?
+                    """,
+                    (subscription_id,),
+                ).fetchone()
+                job = conn.execute(
+                    """
+                    SELECT id, status
+                    FROM refresh_jobs
+                    WHERE id = ? AND subscription_id = ?
+                    """,
+                    (job_id, subscription_id),
+                ).fetchone()
+                if (
+                    not subscription
+                    or not job
+                    or subscription["url"] != expected_url
+                    or subscription["last_job_id"] != job_id
+                    or job["status"] != "running"
+                ):
+                    return False
+
+                conn.execute(
+                    """
+                    INSERT INTO subscription_results (
+                        subscription_id, result_json, node_count, valid_count, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(subscription_id) DO UPDATE SET
+                        result_json = excluded.result_json,
+                        node_count = excluded.node_count,
+                        valid_count = excluded.valid_count,
+                        updated_at = excluded.updated_at
+                    """,
+                    (subscription_id, payload, node_count, valid_count, now),
+                )
+                conn.execute(
+                    """
+                    UPDATE refresh_jobs
+                    SET status = 'completed',
+                        phase = 'completed',
+                        processed_nodes = ?,
+                        total_nodes = ?,
+                        finished_at = ?
+                    WHERE id = ?
+                    """,
+                    (node_count, node_count, now, job_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_status = 'completed', updated_at = ?
+                    WHERE id = ? AND last_job_id = ?
+                    """,
+                    (now, subscription_id, job_id),
+                )
+                conn.commit()
+                return True
             finally:
                 conn.close()
 

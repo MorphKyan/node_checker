@@ -1,15 +1,17 @@
 import base64
+import asyncio
 import tempfile
 import unittest
 from dataclasses import asdict
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 from api_server import app
 from models import AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode
 from module_api_store import ApiStore
+from module_subscription_service import SubscriptionRefreshService
 from settings import settings
 
 
@@ -61,6 +63,7 @@ class ApiServerTests(unittest.TestCase):
         self.original_cache_enabled = settings.CACHE_ENABLED
         self.original_runtime_settings_path = settings.RUNTIME_SETTINGS_PATH
         self.original_filter_concurrency = settings.FILTER_CONCURRENCY
+        self.original_speedtest_concurrency = settings.SPEEDTEST_CONCURRENCY
         self.original_speedtest_limit = settings.API_DEFAULT_SPEEDTEST_LIMIT
         settings.API_DB_PATH = str(Path(self.tmpdir.name, "api.sqlite3"))
         settings.CACHE_DB_PATH = str(Path(self.tmpdir.name, "probe_cache.sqlite3"))
@@ -82,6 +85,7 @@ class ApiServerTests(unittest.TestCase):
         settings.CACHE_ENABLED = self.original_cache_enabled
         settings.RUNTIME_SETTINGS_PATH = self.original_runtime_settings_path
         settings.FILTER_CONCURRENCY = self.original_filter_concurrency
+        settings.SPEEDTEST_CONCURRENCY = self.original_speedtest_concurrency
         settings.API_DEFAULT_SPEEDTEST_LIMIT = self.original_speedtest_limit
         ApiStore._initialized_paths.clear()
         self.tmpdir.cleanup()
@@ -134,12 +138,73 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(patch_response.status_code, 200)
         self.assertEqual(patch_response.json()["name"], "renamed")
         self.assertEqual(patch_response.json()["url"], "https://example.com/next")
+        self.assertEqual(patch_response.json()["node_count"], 0)
+        self.assertEqual(self.client.get(f"/subscriptions/{subscription['id']}/results").status_code, 409)
 
         delete_response = self.client.delete(f"/subscriptions/{subscription['id']}")
         self.assertEqual(delete_response.status_code, 200)
         self.assertEqual(delete_response.json()["deleted"], True)
         self.assertEqual(self.client.get(f"/subscriptions/{subscription['id']}").status_code, 404)
         self.assertEqual(self.client.get(f"/subscriptions/{subscription['id']}/results").status_code, 404)
+
+    def test_update_subscription_name_keeps_existing_results(self):
+        subscription = self.create_subscription_without_refresh()
+        self.save_result(subscription["id"])
+
+        patch_response = self.client.patch(
+            f"/subscriptions/{subscription['id']}",
+            json={"name": "renamed"},
+        )
+
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["name"], "renamed")
+        self.assertEqual(patch_response.json()["node_count"], 1)
+        self.assertEqual(self.client.get(f"/subscriptions/{subscription['id']}/results").status_code, 200)
+
+    def test_update_subscription_url_fails_active_jobs(self):
+        subscription = self.create_subscription_without_refresh()
+        self.save_result(subscription["id"])
+        active_job = ApiStore.create_refresh_job(subscription["id"], 3, False)
+
+        updated = ApiStore.update_subscription(subscription["id"], url="https://example.com/next")
+
+        self.assertEqual(updated["last_status"], "new")
+        self.assertIsNone(updated["last_job_id"])
+        self.assertIsNone(ApiStore.get_latest_result(subscription["id"]))
+        self.assertIsNone(ApiStore.find_active_job(subscription["id"]))
+        failed_job = ApiStore.get_job(active_job["id"])
+        self.assertEqual(failed_job["status"], "failed")
+        self.assertEqual(failed_job["phase"], "failed")
+        self.assertIn("Subscription URL changed", failed_job["error"])
+
+    def test_stale_active_jobs_are_marked_failed(self):
+        subscription = self.create_subscription_without_refresh()
+        active_job = ApiStore.create_refresh_job(subscription["id"], 3, False)
+
+        count = ApiStore.fail_stale_active_jobs("test restart")
+
+        self.assertEqual(count, 1)
+        self.assertEqual(ApiStore.get_job(active_job["id"])["status"], "failed")
+        self.assertEqual(ApiStore.get_job(active_job["id"])["error"], "test restart")
+        self.assertEqual(ApiStore.get_subscription(subscription["id"])["last_status"], "failed")
+
+    def test_old_job_status_update_does_not_overwrite_current_job(self):
+        subscription = self.create_subscription_without_refresh()
+        old_job = ApiStore.create_refresh_job(subscription["id"], 3, False)
+        ApiStore.update_subscription(subscription["id"], url="https://example.com/next")
+        new_job = ApiStore.create_refresh_job(subscription["id"], 3, False)
+
+        ApiStore.update_job(
+            old_job["id"],
+            status="failed",
+            phase="failed",
+            error="late old job failure",
+            finished_at=ApiStore.now(),
+        )
+
+        subscription_after_update = ApiStore.get_subscription(subscription["id"])
+        self.assertEqual(subscription_after_update["last_job_id"], new_job["id"])
+        self.assertEqual(subscription_after_update["last_status"], "queued")
 
     def test_refresh_supports_speedtest_limit_and_force_probe(self):
         subscription = self.create_subscription_without_refresh()
@@ -154,6 +219,50 @@ class ApiServerTests(unittest.TestCase):
         job = ApiStore.get_job(payload["job_id"])
         self.assertEqual(job["speedtest_limit"], 0)
         self.assertEqual(job["force_probe"], 1)
+
+    def test_schedule_refresh_marks_job_failed_when_no_event_loop_is_running(self):
+        subscription = self.create_subscription_without_refresh()
+
+        job = SubscriptionRefreshService.schedule_refresh(subscription["id"])
+
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(job["phase"], "failed")
+        self.assertIn("Unable to schedule refresh task", job["error"])
+        self.assertEqual(
+            ApiStore.get_subscription(subscription["id"])["last_status"],
+            "failed",
+        )
+
+    def test_refresh_discards_results_when_subscription_url_changes_during_run(self):
+        async def run_case():
+            subscription = self.create_subscription_without_refresh()
+            job = ApiStore.create_refresh_job(subscription["id"], 3, False)
+
+            async def run_nodes(*args, **kwargs):
+                ApiStore.update_subscription(subscription["id"], url="https://example.com/next")
+                return [make_tested_node()]
+
+            with (
+                patch("module_subscription_service.setup_singbox"),
+                patch("module_subscription_service.ProbeCache.init_db", new=AsyncMock()),
+                patch.object(
+                    SubscriptionRefreshService,
+                    "fetch_subscription_text",
+                    new=AsyncMock(return_value="vless://uuid@example.com:443?security=tls#JP"),
+                ),
+                patch.object(SubscriptionRefreshService, "run_nodes", side_effect=run_nodes),
+            ):
+                with self.assertRaisesRegex(ValueError, "no longer current"):
+                    await SubscriptionRefreshService.run_subscription_refresh(
+                        subscription["id"],
+                        job["id"],
+                        speedtest_limit=3,
+                    )
+
+            self.assertIsNone(ApiStore.get_latest_result(subscription["id"]))
+            self.assertEqual(ApiStore.get_job(job["id"])["status"], "failed")
+
+        asyncio.run(run_case())
 
     def test_get_job_returns_status(self):
         subscription = self.create_subscription_without_refresh()
@@ -225,13 +334,19 @@ class ApiServerTests(unittest.TestCase):
 
         patch_response = self.client.patch(
             "/settings",
-            json={"FILTER_CONCURRENCY": 7, "API_DEFAULT_SPEEDTEST_LIMIT": 0},
+            json={
+                "FILTER_CONCURRENCY": 7,
+                "SPEEDTEST_CONCURRENCY": 3,
+                "API_DEFAULT_SPEEDTEST_LIMIT": 0,
+            },
         )
         self.assertEqual(patch_response.status_code, 200)
         payload = patch_response.json()
         self.assertEqual(payload["FILTER_CONCURRENCY"], 7)
+        self.assertEqual(payload["SPEEDTEST_CONCURRENCY"], 3)
         self.assertEqual(payload["API_DEFAULT_SPEEDTEST_LIMIT"], 0)
         self.assertEqual(settings.FILTER_CONCURRENCY, 7)
+        self.assertEqual(settings.SPEEDTEST_CONCURRENCY, 3)
 
         runtime_file = Path(settings.RUNTIME_SETTINGS_PATH)
         self.assertTrue(runtime_file.exists())
@@ -239,6 +354,17 @@ class ApiServerTests(unittest.TestCase):
     def test_invalid_setting_value_returns_422(self):
         response = self.client.patch("/settings", json={"FILTER_CONCURRENCY": 0})
         self.assertEqual(response.status_code, 422)
+
+    def test_refresh_rejects_excessive_speedtest_limit(self):
+        subscription = self.create_subscription_without_refresh()
+
+        response = self.client.post(
+            f"/subscriptions/{subscription['id']}/refresh",
+            json={"speedtest_limit": 101},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIsNone(ApiStore.find_active_job(subscription["id"]))
 
     def test_static_frontend_fallback_returns_index_when_dist_exists(self):
         dist = Path("frontend", "dist")

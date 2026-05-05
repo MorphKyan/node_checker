@@ -10,12 +10,13 @@ class RuntimeSettingsTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.original_path = settings.RUNTIME_SETTINGS_PATH
-        self.original_filter_concurrency = settings.FILTER_CONCURRENCY
+        self.original_values = RuntimeSettings.get_editable()
         settings.RUNTIME_SETTINGS_PATH = str(Path(self.tmpdir.name, "runtime_settings.json"))
 
     def tearDown(self):
         settings.RUNTIME_SETTINGS_PATH = self.original_path
-        settings.FILTER_CONCURRENCY = self.original_filter_concurrency
+        for key, value in self.original_values.items():
+            setattr(settings, key, value)
         self.tmpdir.cleanup()
 
     def test_apply_rejects_wrong_scalar_types(self):
@@ -31,6 +32,28 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(updated["FILTER_CONCURRENCY"], 7)
         self.assertEqual(settings.FILTER_CONCURRENCY, 7)
 
+    def test_apply_rejects_values_outside_runtime_limits(self):
+        with self.assertRaises(ValueError):
+            RuntimeSettings.apply({"FILTER_CONCURRENCY": 0}, persist=False)
+
+        with self.assertRaises(ValueError):
+            RuntimeSettings.apply({"SPEEDTEST_CONCURRENCY": 21}, persist=False)
+
+        with self.assertRaises(ValueError):
+            RuntimeSettings.apply({"API_DEFAULT_SPEEDTEST_LIMIT": 101}, persist=False)
+
+        with self.assertRaises(ValueError):
+            RuntimeSettings.apply({"PROBE_CACHE_TTL_SECONDS": 59}, persist=False)
+
+        with self.assertRaises(ValueError):
+            RuntimeSettings.apply({"SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH": 15}, persist=False)
+
+        with self.assertRaises(ValueError):
+            RuntimeSettings.apply({"SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH": 241}, persist=False)
+
+        with self.assertRaises(ValueError):
+            RuntimeSettings.apply({"TTFB_TARGET_URL": ""}, persist=False)
+
     def test_load_ignores_invalid_persisted_settings(self):
         Path(settings.RUNTIME_SETTINGS_PATH).write_text(
             '{"FILTER_CONCURRENCY": "bad"}',
@@ -39,7 +62,17 @@ class RuntimeSettingsTests(unittest.TestCase):
 
         RuntimeSettings.load()
 
-        self.assertEqual(settings.FILTER_CONCURRENCY, self.original_filter_concurrency)
+        self.assertEqual(settings.FILTER_CONCURRENCY, self.original_values["FILTER_CONCURRENCY"])
+
+    def test_load_ignores_persisted_values_outside_runtime_limits(self):
+        Path(settings.RUNTIME_SETTINGS_PATH).write_text(
+            '{"FILTER_CONCURRENCY": 0}',
+            encoding="utf-8",
+        )
+
+        RuntimeSettings.load()
+
+        self.assertEqual(settings.FILTER_CONCURRENCY, self.original_values["FILTER_CONCURRENCY"])
 
 
 if __name__ == "__main__":

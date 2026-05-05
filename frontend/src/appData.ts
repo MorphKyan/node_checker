@@ -11,7 +11,7 @@ export function useAppData(api: ApiClient, preferences: LocalPreferences) {
 
   const results = useQueries({
     queries: (subscriptions.data || []).map((subscription) => ({
-      queryKey: ["results", preferences.apiBaseUrl, subscription.id],
+      queryKey: ["results", preferences.apiBaseUrl, subscription.id, subscription.url],
       queryFn: async () => {
         try {
           return await api.getResults(subscription.id);

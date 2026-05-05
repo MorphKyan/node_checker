@@ -67,6 +67,7 @@ export interface SubscriptionResults {
 
 export interface RuntimeSettings {
   FILTER_CONCURRENCY: number;
+  SPEEDTEST_CONCURRENCY: number;
   API_DEFAULT_SPEEDTEST_LIMIT: number;
   CACHE_ENABLED: boolean;
   PROBE_CACHE_TTL_SECONDS: number;

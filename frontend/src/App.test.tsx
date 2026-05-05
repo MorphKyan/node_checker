@@ -15,6 +15,8 @@ describe("App", () => {
           CACHE_ENABLED: true,
           PROBE_CACHE_TTL_SECONDS: 86400,
           CACHE_FAILURE_RESULTS: false,
+          SUBSCRIPTION_MAX_BYTES: 2097152,
+          SPEEDTEST_MAX_BYTES: 8388608,
           SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: 64,
           SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: 96,
           TTFB_TARGET_URL: "http://example.com",

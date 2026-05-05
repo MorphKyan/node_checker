@@ -1,5 +1,7 @@
 import asyncio
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from models import AnalyzedNode, ProbeData, TestedNode, VlessNode
@@ -36,6 +38,19 @@ def make_analyzed_node(node: VlessNode, score: float = 90.0) -> AnalyzedNode:
 
 
 class SubscriptionRefreshServiceTests(unittest.TestCase):
+    def test_fetch_subscription_text_rejects_large_local_file(self):
+        original_max_bytes = settings.SUBSCRIPTION_MAX_BYTES
+        settings.SUBSCRIPTION_MAX_BYTES = 8
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = Path(tmpdir, "sub.txt")
+                path.write_text("123456789", encoding="utf-8")
+
+                with self.assertRaisesRegex(ValueError, "exceeds 8 bytes"):
+                    asyncio.run(SubscriptionRefreshService.fetch_subscription_text(str(path)))
+        finally:
+            settings.SUBSCRIPTION_MAX_BYTES = original_max_bytes
+
     def test_run_nodes_limits_speedtest_concurrency(self):
         async def run_case():
             original_speedtest_concurrency = settings.SPEEDTEST_CONCURRENCY

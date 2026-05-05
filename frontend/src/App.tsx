@@ -681,6 +681,8 @@ function SettingsView({ settings, preferences, onSaveSettings, onPreferences, on
             <SettingNumber label="测速并发" value={current.SPEEDTEST_CONCURRENCY} onChange={(value) => setDraft({ ...draft, SPEEDTEST_CONCURRENCY: value })} />
             <SettingNumber label="默认测速数量" value={current.API_DEFAULT_SPEEDTEST_LIMIT} onChange={(value) => setDraft({ ...draft, API_DEFAULT_SPEEDTEST_LIMIT: value })} />
             <SettingNumber label="缓存 TTL 秒" value={current.PROBE_CACHE_TTL_SECONDS} onChange={(value) => setDraft({ ...draft, PROBE_CACHE_TTL_SECONDS: value })} />
+            <SettingNumber label="订阅最大字节" value={current.SUBSCRIPTION_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_MAX_BYTES: value })} />
+            <SettingNumber label="测速最大字节" value={current.SPEEDTEST_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SPEEDTEST_MAX_BYTES: value })} />
             <SettingNumber label="compact 长度" value={current.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: value })} />
             <SettingNumber label="detailed 长度" value={current.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: value })} />
             <div><Label>缓存开关</Label><Select className="mt-1 w-full" value={String(current.CACHE_ENABLED)} onChange={(event) => setDraft({ ...draft, CACHE_ENABLED: event.target.value === "true" })}><option value="true">开启</option><option value="false">关闭</option></Select></div>

@@ -1,13 +1,11 @@
-import json
 import os
 import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import asdict
 
-from models import AnalyzedNode, TestedNode, VlessNode
-from module_cache import ProbeCache
+from models import TestedNode
+from module_result_codec import tested_nodes_from_json, tested_nodes_to_json
 from settings import settings
 
 
@@ -339,7 +337,7 @@ class ApiStore:
     @classmethod
     def save_results(cls, subscription_id: str, nodes: list[TestedNode]) -> None:
         cls.init_db()
-        payload = json.dumps([asdict(node) for node in nodes], ensure_ascii=False)
+        payload = tested_nodes_to_json(nodes)
         node_count = len(nodes)
         valid_count = sum(1 for node in nodes if node.analyzed_node.is_valid)
         now = cls.now()
@@ -387,32 +385,7 @@ class ApiStore:
             if not row:
                 return None
             data = dict(row)
-            data["nodes"] = cls.restore_tested_nodes(json.loads(data.pop("result_json")))
+            data["nodes"] = tested_nodes_from_json(data.pop("result_json"))
             return data
         finally:
             conn.close()
-
-    @classmethod
-    def restore_tested_nodes(cls, data: list[dict]) -> list[TestedNode]:
-        restored = []
-        for item in data:
-            analyzed_data = item["analyzed_node"]
-            node_data = analyzed_data["node"]
-            probe_data = analyzed_data["probe"]
-            node = VlessNode(**node_data)
-            probe = ProbeCache._restore_probe_data(probe_data)
-            analyzed = AnalyzedNode(
-                node=node,
-                probe=probe,
-                is_valid=analyzed_data["is_valid"],
-                total_score=analyzed_data["total_score"],
-                reject_reason=analyzed_data.get("reject_reason", ""),
-                score_details=analyzed_data.get("score_details", ""),
-            )
-            restored.append(
-                TestedNode(
-                    analyzed_node=analyzed,
-                    download_speed_mbps=item.get("download_speed_mbps", 0.0),
-                )
-            )
-        return restored

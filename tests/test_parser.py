@@ -1,6 +1,10 @@
+import asyncio
 import unittest
 
+from aiohttp import web
+
 from module_parser import VlessParser
+from settings import settings
 
 
 class VlessParserTests(unittest.TestCase):
@@ -20,6 +24,83 @@ class VlessParserTests(unittest.TestCase):
         self.assertTrue(VlessParser.is_http_source("HTTP://example.com/sub"))
         self.assertFalse(VlessParser.is_http_source("http_subscriptions.txt"))
         self.assertFalse(VlessParser.is_http_source("file:///tmp/subscriptions.txt"))
+
+    def test_fetch_subscription_rejects_large_content_length(self):
+        async def run_case():
+            original_max_bytes = settings.SUBSCRIPTION_MAX_BYTES
+            settings.SUBSCRIPTION_MAX_BYTES = 16
+
+            async def handler(request):
+                return web.Response(body=b"12345678901234567")
+
+            app = web.Application()
+            app.router.add_get("/sub", handler)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, "127.0.0.1", 0)
+            await site.start()
+            port = site._server.sockets[0].getsockname()[1]
+            try:
+                with self.assertRaisesRegex(ValueError, "exceeds 16 bytes"):
+                    await VlessParser.fetch_subscription(f"http://127.0.0.1:{port}/sub")
+            finally:
+                settings.SUBSCRIPTION_MAX_BYTES = original_max_bytes
+                await runner.cleanup()
+
+        asyncio.run(run_case())
+
+    def test_fetch_subscription_rejects_stream_over_limit(self):
+        async def run_case():
+            original_max_bytes = settings.SUBSCRIPTION_MAX_BYTES
+            settings.SUBSCRIPTION_MAX_BYTES = 8
+
+            async def handler(request):
+                response = web.StreamResponse()
+                await response.prepare(request)
+                await response.write(b"1234")
+                await response.write(b"56789")
+                await response.write_eof()
+                return response
+
+            app = web.Application()
+            app.router.add_get("/sub", handler)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, "127.0.0.1", 0)
+            await site.start()
+            port = site._server.sockets[0].getsockname()[1]
+            try:
+                with self.assertRaisesRegex(ValueError, "exceeds 8 bytes"):
+                    await VlessParser.fetch_subscription(f"http://127.0.0.1:{port}/sub")
+            finally:
+                settings.SUBSCRIPTION_MAX_BYTES = original_max_bytes
+                await runner.cleanup()
+
+        asyncio.run(run_case())
+
+    def test_fetch_subscription_allows_response_at_limit(self):
+        async def run_case():
+            original_max_bytes = settings.SUBSCRIPTION_MAX_BYTES
+            settings.SUBSCRIPTION_MAX_BYTES = 8
+
+            async def handler(request):
+                return web.Response(body=b"12345678")
+
+            app = web.Application()
+            app.router.add_get("/sub", handler)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, "127.0.0.1", 0)
+            await site.start()
+            port = site._server.sockets[0].getsockname()[1]
+            try:
+                text = await VlessParser.fetch_subscription(f"http://127.0.0.1:{port}/sub")
+            finally:
+                settings.SUBSCRIPTION_MAX_BYTES = original_max_bytes
+                await runner.cleanup()
+            return text
+
+        self.assertEqual(asyncio.run(run_case()), "12345678")
 
 
 if __name__ == "__main__":

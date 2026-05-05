@@ -27,6 +27,9 @@ class SubscriptionRefreshService:
         if VlessParser.is_http_source(source):
             return await VlessParser.fetch_subscription(source)
         if os.path.exists(source):
+            max_bytes = max(1, int(settings.SUBSCRIPTION_MAX_BYTES))
+            if os.path.getsize(source) > max_bytes:
+                raise ValueError(f"Subscription file exceeds {max_bytes} bytes")
             with open(source, "r", encoding="utf-8") as f:
                 raw_text = f.read().strip()
             if raw_text.startswith("http") and "\n" not in raw_text:

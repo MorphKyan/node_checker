@@ -65,6 +65,8 @@ class ApiServerTests(unittest.TestCase):
         self.original_filter_concurrency = settings.FILTER_CONCURRENCY
         self.original_speedtest_concurrency = settings.SPEEDTEST_CONCURRENCY
         self.original_speedtest_limit = settings.API_DEFAULT_SPEEDTEST_LIMIT
+        self.original_subscription_max_bytes = settings.SUBSCRIPTION_MAX_BYTES
+        self.original_speedtest_max_bytes = settings.SPEEDTEST_MAX_BYTES
         settings.API_DB_PATH = str(Path(self.tmpdir.name, "api.sqlite3"))
         settings.CACHE_DB_PATH = str(Path(self.tmpdir.name, "probe_cache.sqlite3"))
         settings.RUNTIME_SETTINGS_PATH = str(Path(self.tmpdir.name, "runtime_settings.json"))
@@ -87,6 +89,8 @@ class ApiServerTests(unittest.TestCase):
         settings.FILTER_CONCURRENCY = self.original_filter_concurrency
         settings.SPEEDTEST_CONCURRENCY = self.original_speedtest_concurrency
         settings.API_DEFAULT_SPEEDTEST_LIMIT = self.original_speedtest_limit
+        settings.SUBSCRIPTION_MAX_BYTES = self.original_subscription_max_bytes
+        settings.SPEEDTEST_MAX_BYTES = self.original_speedtest_max_bytes
         ApiStore._initialized_paths.clear()
         self.tmpdir.cleanup()
 
@@ -338,6 +342,8 @@ class ApiServerTests(unittest.TestCase):
                 "FILTER_CONCURRENCY": 7,
                 "SPEEDTEST_CONCURRENCY": 3,
                 "API_DEFAULT_SPEEDTEST_LIMIT": 0,
+                "SUBSCRIPTION_MAX_BYTES": 4096,
+                "SPEEDTEST_MAX_BYTES": 2 * 1024 * 1024,
             },
         )
         self.assertEqual(patch_response.status_code, 200)
@@ -345,8 +351,12 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload["FILTER_CONCURRENCY"], 7)
         self.assertEqual(payload["SPEEDTEST_CONCURRENCY"], 3)
         self.assertEqual(payload["API_DEFAULT_SPEEDTEST_LIMIT"], 0)
+        self.assertEqual(payload["SUBSCRIPTION_MAX_BYTES"], 4096)
+        self.assertEqual(payload["SPEEDTEST_MAX_BYTES"], 2 * 1024 * 1024)
         self.assertEqual(settings.FILTER_CONCURRENCY, 7)
         self.assertEqual(settings.SPEEDTEST_CONCURRENCY, 3)
+        self.assertEqual(settings.SUBSCRIPTION_MAX_BYTES, 4096)
+        self.assertEqual(settings.SPEEDTEST_MAX_BYTES, 2 * 1024 * 1024)
 
         runtime_file = Path(settings.RUNTIME_SETTINGS_PATH)
         self.assertTrue(runtime_file.exists())

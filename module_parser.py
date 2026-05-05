@@ -24,10 +24,33 @@ class VlessParser:
     @staticmethod
     async def fetch_subscription(url: str) -> str:
         timeout = aiohttp.ClientTimeout(total=settings.API_TIMEOUT)
+        max_bytes = max(1, int(settings.SUBSCRIPTION_MAX_BYTES))
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as resp:
                 resp.raise_for_status()
-                return await resp.text()
+                content_length = resp.headers.get("Content-Length")
+                if content_length:
+                    try:
+                        if int(content_length) > max_bytes:
+                            raise ValueError(
+                                f"Subscription response exceeds {max_bytes} bytes"
+                            )
+                    except ValueError as e:
+                        if "exceeds" in str(e):
+                            raise
+
+                chunks = []
+                downloaded_bytes = 0
+                async for chunk in resp.content.iter_chunked(65536):
+                    downloaded_bytes += len(chunk)
+                    if downloaded_bytes > max_bytes:
+                        raise ValueError(
+                            f"Subscription response exceeds {max_bytes} bytes"
+                        )
+                    chunks.append(chunk)
+
+                encoding = resp.charset or "utf-8"
+                return b"".join(chunks).decode(encoding)
 
     @staticmethod
     def parse_nodes(raw_text: str) -> list[VlessNode]:

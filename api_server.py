@@ -62,6 +62,8 @@ class RuntimeSettingsRequest(BaseModel):
     CACHE_ENABLED: Optional[bool] = None
     PROBE_CACHE_TTL_SECONDS: Optional[int] = Field(default=None, ge=60)
     CACHE_FAILURE_RESULTS: Optional[bool] = None
+    SUBSCRIPTION_MAX_BYTES: Optional[int] = Field(default=None, ge=1024, le=50 * 1024 * 1024)
+    SPEEDTEST_MAX_BYTES: Optional[int] = Field(default=None, ge=1024 * 1024, le=256 * 1024 * 1024)
     SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: Optional[int] = Field(default=None, ge=16, le=160)
     SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: Optional[int] = Field(default=None, ge=32, le=240)
     TTFB_TARGET_URL: Optional[str] = Field(default=None, min_length=1)

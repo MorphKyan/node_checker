@@ -8,10 +8,18 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          charts: ["recharts"],
-          icons: ["lucide-react"],
-          react: ["@tanstack/react-query", "react", "react-dom"],
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("recharts")) return "charts";
+          if (id.includes("lucide-react")) return "icons";
+          if (
+            id.includes("@tanstack/react-query") ||
+            id.includes("react-dom") ||
+            id.includes("react")
+          ) {
+            return "react";
+          }
+          return undefined;
         },
       },
     },

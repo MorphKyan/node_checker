@@ -1,6 +1,6 @@
-httpx[http2]
-httpx-socks[asyncio]
-aiohttp
-aiohttp-socks
-fastapi
-uvicorn[standard]
+httpx[http2]>=0.28.1,<0.29
+httpx-socks[asyncio]>=0.11.0,<0.12
+aiohttp>=3.13.5,<4
+aiohttp-socks>=0.11.0,<0.12
+fastapi>=0.136.1,<1
+uvicorn[standard]>=0.46.0,<1

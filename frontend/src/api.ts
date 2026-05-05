@@ -35,6 +35,10 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, "")}${path}`;
 }
 
+function pathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
 async function request<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(joinUrl(baseUrl, path), {
     headers: {
@@ -66,35 +70,35 @@ async function request<T>(baseUrl: string, path: string, init?: RequestInit): Pr
 export function createApiClient(baseUrl: string): ApiClient {
   return {
     listSubscriptions: () => request(baseUrl, "/subscriptions"),
-    getSubscription: (id) => request(baseUrl, `/subscriptions/${id}`),
+    getSubscription: (id) => request(baseUrl, `/subscriptions/${pathSegment(id)}`),
     createSubscription: (input) =>
       request(baseUrl, "/subscriptions", {
         method: "POST",
         body: JSON.stringify(input),
       }),
     updateSubscription: (id, input) =>
-      request(baseUrl, `/subscriptions/${id}`, {
+      request(baseUrl, `/subscriptions/${pathSegment(id)}`, {
         method: "PATCH",
         body: JSON.stringify(input),
       }),
     deleteSubscription: (id) =>
-      request(baseUrl, `/subscriptions/${id}`, {
+      request(baseUrl, `/subscriptions/${pathSegment(id)}`, {
         method: "DELETE",
       }),
     refreshSubscription: (id, input) =>
-      request(baseUrl, `/subscriptions/${id}/refresh`, {
+      request(baseUrl, `/subscriptions/${pathSegment(id)}/refresh`, {
         method: "POST",
         body: JSON.stringify(input),
       }),
-    getJob: (id) => request(baseUrl, `/jobs/${id}`),
-    getResults: (id) => request(baseUrl, `/subscriptions/${id}/results`),
+    getJob: (id) => request(baseUrl, `/jobs/${pathSegment(id)}`),
+    getResults: (id) => request(baseUrl, `/subscriptions/${pathSegment(id)}/results`),
     getEnhanced: (id, params) => {
       const query = new URLSearchParams({
         mode: params.mode,
         format: params.format,
         valid_only: String(params.valid_only),
       });
-      return request(baseUrl, `/subscriptions/${id}/enhanced?${query.toString()}`);
+      return request(baseUrl, `/subscriptions/${pathSegment(id)}/enhanced?${query.toString()}`);
     },
     getSettings: () => request(baseUrl, "/settings"),
     updateSettings: (input) =>
@@ -111,5 +115,5 @@ export function enhancedUrl(baseUrl: string, id: string, params: { mode: ExportM
     format: params.format,
     valid_only: String(params.valid_only),
   });
-  return joinUrl(baseUrl, `/subscriptions/${id}/enhanced?${query.toString()}`);
+  return joinUrl(baseUrl, `/subscriptions/${pathSegment(id)}/enhanced?${query.toString()}`);
 }

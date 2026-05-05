@@ -25,8 +25,12 @@ class Config:
     # 测试目标 URLs
     TTFB_TARGET_URL = "http://www.gstatic.com/generate_204"
     IPWHOIS_API = "http://ipwho.is/"
-    IPAPI_API = "https://api.ipapi.is?q={ip}&key=f61c48dc3d163908ae7c"
-    SCAMALYTICS_API = "https://api13.scamalytics.com/v3/69f7fa7688915/?key=d28737974455ac4b60bd8168b1054f64df664fb2ac8e8320a18032e4539b1445&ip={ip}"
+    IPAPI_KEY = os.getenv("IPAPI_KEY", "")
+    IPAPI_API = os.getenv(
+        "IPAPI_API",
+        f"https://api.ipapi.is?q={{ip}}{'&key=' + IPAPI_KEY if IPAPI_KEY else ''}",
+    )
+    SCAMALYTICS_API = os.getenv("SCAMALYTICS_API", "")
     SPEEDTEST_URL = "https://dl.google.com/android/repository/platform-tools_r35.0.0-windows.zip" # ~6MB
 
     # 评分规则阈值

@@ -21,4 +21,20 @@ describe("api client", () => {
       "/subscriptions/sub_1/enhanced?mode=detailed&format=plain&valid_only=false",
     );
   });
+
+  it("encodes path parameters", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ nodes: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })));
+
+    const client = createApiClient("");
+    await client.getResults("sub/with space");
+
+    expect(fetch).toHaveBeenCalledWith("/subscriptions/sub%2Fwith%20space/results", expect.any(Object));
+    expect(enhancedUrl("", "sub/with space", { mode: "compact", format: "base64", valid_only: true })).toBe(
+      "/subscriptions/sub%2Fwith%20space/enhanced?mode=compact&format=base64&valid_only=true",
+    );
+    vi.unstubAllGlobals();
+  });
 });

@@ -204,14 +204,14 @@ class ProbeCacheRestoreTests(unittest.TestCase):
             original_enabled = settings.CACHE_ENABLED
             original_db_path = settings.CACHE_DB_PATH
             original_failure_results = settings.CACHE_FAILURE_RESULTS
-            original_initialized = ProbeCache._initialized
+            original_initialized_paths = set(ProbeCache._initialized_paths)
 
             try:
                 with tempfile.TemporaryDirectory() as tmpdir:
                     settings.CACHE_ENABLED = True
                     settings.CACHE_DB_PATH = str(Path(tmpdir, "probe_cache.sqlite3"))
                     settings.CACHE_FAILURE_RESULTS = True
-                    ProbeCache._initialized = False
+                    ProbeCache._initialized_paths.clear()
 
                     tested = make_tested_node(
                         "vless://uuid@example.com:443?security=tls#Old",
@@ -229,7 +229,7 @@ class ProbeCacheRestoreTests(unittest.TestCase):
                 settings.CACHE_ENABLED = original_enabled
                 settings.CACHE_DB_PATH = original_db_path
                 settings.CACHE_FAILURE_RESULTS = original_failure_results
-                ProbeCache._initialized = original_initialized
+                ProbeCache._initialized_paths = original_initialized_paths
 
         restored = asyncio.run(run_case())
 
@@ -239,6 +239,36 @@ class ProbeCacheRestoreTests(unittest.TestCase):
             SubscriptionExporter.format_network_labels(restored.profile),
             "托管机房",
         )
+
+    def test_cache_initializes_each_configured_database_path(self):
+        async def run_case():
+            original_enabled = settings.CACHE_ENABLED
+            original_db_path = settings.CACHE_DB_PATH
+            original_failure_results = settings.CACHE_FAILURE_RESULTS
+            original_initialized_paths = set(ProbeCache._initialized_paths)
+
+            try:
+                settings.CACHE_ENABLED = True
+                settings.CACHE_FAILURE_RESULTS = True
+                ProbeCache._initialized_paths.clear()
+
+                with tempfile.TemporaryDirectory() as first_dir:
+                    first_path = str(Path(first_dir, "probe_cache.sqlite3"))
+                    settings.CACHE_DB_PATH = first_path
+                    await ProbeCache.init_db()
+
+                with tempfile.TemporaryDirectory() as second_dir:
+                    second_path = str(Path(second_dir, "probe_cache.sqlite3"))
+                    settings.CACHE_DB_PATH = second_path
+                    await ProbeCache.init_db()
+                    return Path(second_path).exists()
+            finally:
+                settings.CACHE_ENABLED = original_enabled
+                settings.CACHE_DB_PATH = original_db_path
+                settings.CACHE_FAILURE_RESULTS = original_failure_results
+                ProbeCache._initialized_paths = original_initialized_paths
+
+        self.assertTrue(asyncio.run(run_case()))
 
 
 if __name__ == "__main__":

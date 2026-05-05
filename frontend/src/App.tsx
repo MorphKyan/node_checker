@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   BarChart3,
@@ -30,7 +30,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { createApiClient, enhancedUrl, ApiError } from "./api";
+import { createApiClient, enhancedUrl } from "./api";
+import { useAppData } from "./appData";
+import { duration, formatTime, groupCount, scoreBuckets, statusTone } from "./appUtils";
+import { filterNodes } from "./nodeFilters";
 import { defaultPreferences, isExportFormat, isExportMode, loadPreferences, savePreferences } from "./preferences";
 import type {
   ExportFormat,
@@ -57,27 +60,6 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
 
 const chartColors = ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#64748b"];
 
-function formatTime(timestamp?: number | null): string {
-  if (!timestamp) return "-";
-  return new Date(timestamp * 1000).toLocaleString();
-}
-
-function duration(job: JobStatus): string {
-  const start = job.started_at || job.created_at;
-  const end = job.finished_at || Math.floor(Date.now() / 1000);
-  const seconds = Math.max(0, end - start);
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}
-
-function statusTone(status: string): "slate" | "green" | "blue" | "red" | "amber" {
-  if (status === "completed") return "green";
-  if (status === "running") return "blue";
-  if (status === "failed") return "red";
-  if (status === "queued") return "amber";
-  return "slate";
-}
-
 function copyText(text: string): void {
   void navigator.clipboard?.writeText(text);
 }
@@ -89,68 +71,6 @@ function downloadText(filename: string, text: string): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(link.href);
-}
-
-function groupCount(values: string[]): Array<{ name: string; value: number }> {
-  const counts = new Map<string, number>();
-  for (const value of values) counts.set(value || "未知", (counts.get(value || "未知") || 0) + 1);
-  return Array.from(counts.entries()).map(([name, value]) => ({ name, value }));
-}
-
-function scoreBuckets(nodes: NodeResult[]) {
-  const buckets = [
-    { name: "0-49", value: 0 },
-    { name: "50-69", value: 0 },
-    { name: "70-84", value: 0 },
-    { name: "85-100", value: 0 },
-  ];
-  for (const node of nodes) {
-    if (node.total_score < 50) buckets[0].value += 1;
-    else if (node.total_score < 70) buckets[1].value += 1;
-    else if (node.total_score < 85) buckets[2].value += 1;
-    else buckets[3].value += 1;
-  }
-  return buckets;
-}
-
-function useAppData(api: ReturnType<typeof createApiClient>, preferences: LocalPreferences) {
-  const subscriptions = useQuery({
-    queryKey: ["subscriptions", preferences.apiBaseUrl],
-    queryFn: api.listSubscriptions,
-    refetchInterval: preferences.autoRefresh ? 15_000 : false,
-  });
-
-  const results = useQueries({
-    queries: (subscriptions.data || []).map((subscription) => ({
-      queryKey: ["results", preferences.apiBaseUrl, subscription.id],
-      queryFn: async () => {
-        try {
-          return await api.getResults(subscription.id);
-        } catch (error) {
-          if (error instanceof ApiError && error.status === 409) return null;
-          throw error;
-        }
-      },
-      enabled: Boolean(subscription.id),
-      refetchInterval: preferences.autoRefresh ? 15_000 : false,
-    })),
-  });
-
-  const jobIds = Array.from(
-    new Set((subscriptions.data || []).map((subscription) => subscription.last_job_id).filter(Boolean) as string[]),
-  );
-  const jobs = useQueries({
-    queries: jobIds.map((jobId) => ({
-      queryKey: ["job", preferences.apiBaseUrl, jobId],
-      queryFn: () => api.getJob(jobId),
-      refetchInterval: (query: { state: { data?: JobStatus } }) => {
-        const status = query.state.data?.status;
-        return preferences.autoRefresh && (status === "queued" || status === "running") ? 2_000 : 15_000;
-      },
-    })),
-  });
-
-  return { subscriptions, results, jobs };
 }
 
 export default function App() {
@@ -198,26 +118,11 @@ export default function App() {
   const averageTtfb = allNodes.length ? allNodes.reduce((sum, node) => sum + node.probe.ttfb_ms, 0) / allNodes.length : 0;
   const maxSpeed = allNodes.reduce((max, node) => Math.max(max, node.download_speed_mbps), 0);
 
-  const filteredNodes = useMemo(() => {
-    const nodes = selectedResult?.nodes || [];
-    return nodes.filter((node) => {
-      const search = nodeSearch.trim().toLowerCase();
-      if (search && !`${node.original_name} ${node.enhanced_name_compact} ${node.probe.actual_ip} ${node.probe.asn_org}`.toLowerCase().includes(search)) return false;
-      if (nodeValidity === "valid" && !node.is_valid) return false;
-      if (nodeValidity === "invalid" && node.is_valid) return false;
-      if (nodeGeo !== "all" && node.probe.actual_geo !== nodeGeo) return false;
-      if (nodeNetwork !== "all" && !node.probe.network_labels.includes(nodeNetwork)) return false;
-      if (nodeType !== "all" && !node.probe.type_labels.includes(nodeType)) return false;
-      if (minScore && node.total_score < Number(minScore)) return false;
-      if (maxTtfb && node.probe.ttfb_ms > Number(maxTtfb)) return false;
-      if (minSpeed && node.download_speed_mbps < Number(minSpeed)) return false;
-      if (detourFilter === "yes" && !node.probe.is_detour) return false;
-      if (detourFilter === "no" && node.probe.is_detour) return false;
-      if (backboneFilter === "yes" && !node.probe.is_backbone) return false;
-      if (backboneFilter === "no" && node.probe.is_backbone) return false;
-      return true;
-    });
-  }, [selectedResult, nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, minScore, maxTtfb, minSpeed, detourFilter, backboneFilter]);
+  const nodeFilters = { nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, minScore, maxTtfb, minSpeed, detourFilter, backboneFilter };
+  const filteredNodes = useMemo(
+    () => filterNodes(selectedResult?.nodes || [], nodeFilters),
+    [selectedResult, nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, minScore, maxTtfb, minSpeed, detourFilter, backboneFilter],
+  );
 
   const totalPages = Math.max(1, Math.ceil(filteredNodes.length / preferences.pageSize));
   const pagedNodes = filteredNodes.slice((page - 1) * preferences.pageSize, page * preferences.pageSize);

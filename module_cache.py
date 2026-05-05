@@ -1,12 +1,12 @@
 import asyncio
-import hashlib
 import json
 import os
 import sqlite3
 import time
-from dataclasses import asdict
 
-from models import ApiVerdict, LabelEvidence, NodeProfile, ProbeData, VlessNode
+from models import ProbeData, VlessNode
+from module_node_identity import make_node_fingerprint, make_node_identity
+from module_result_codec import probe_data_to_json, restore_probe_data
 from settings import settings
 
 
@@ -17,81 +17,11 @@ class ProbeCache:
 
     @staticmethod
     def make_node_fingerprint(node: VlessNode) -> str:
-        identity = {
-            "uuid": node.uuid,
-            "server_ip": node.server_ip,
-            "server_port": node.server_port,
-            "security": node.security,
-            "sni": node.sni,
-            "fp": node.fp,
-            "pbk": node.pbk,
-            "sid": node.sid,
-            "type": node.type,
-            "path": node.path,
-            "host": node.host,
-            "flow": node.flow,
-        }
-        payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return make_node_fingerprint(node)
 
     @staticmethod
     def make_node_identity(node: VlessNode) -> str:
-        identity = {
-            "server": f"{node.server_ip}:{node.server_port}",
-            "security": node.security,
-            "type": node.type,
-            "sni": node.sni,
-            "host": node.host,
-        }
-        return json.dumps(identity, sort_keys=True, ensure_ascii=False)
-
-    @staticmethod
-    def _restore_label_evidence(items) -> list[LabelEvidence]:
-        restored = []
-        for item in items or []:
-            if isinstance(item, LabelEvidence):
-                restored.append(item)
-            elif isinstance(item, dict):
-                restored.append(LabelEvidence(**item))
-        return restored
-
-    @classmethod
-    def _restore_api_verdict(cls, data) -> ApiVerdict:
-        if isinstance(data, ApiVerdict):
-            return data
-        return ApiVerdict(
-            source=data.get("source", ""),
-            network_labels=cls._restore_label_evidence(data.get("network_labels")),
-            risk_labels=cls._restore_label_evidence(data.get("risk_labels")),
-            risk_score=data.get("risk_score"),
-            raw_summary=data.get("raw_summary", ""),
-        )
-
-    @classmethod
-    def _restore_node_profile(cls, data) -> NodeProfile:
-        if isinstance(data, NodeProfile):
-            return data
-        if not isinstance(data, dict):
-            return NodeProfile()
-        return NodeProfile(
-            display_labels=list(data.get("display_labels") or ["未知"]),
-            network_labels=cls._restore_label_evidence(data.get("network_labels")),
-            risk_labels=cls._restore_label_evidence(data.get("risk_labels")),
-            risk_score=float(data.get("risk_score", 0.0) or 0.0),
-            confidence=data.get("confidence", "low"),
-            evidence=[
-                cls._restore_api_verdict(item)
-                for item in data.get("evidence", [])
-                if isinstance(item, (ApiVerdict, dict))
-            ],
-        )
-
-    @classmethod
-    def _restore_probe_data(cls, data: dict) -> ProbeData:
-        data = dict(data)
-        if "profile" in data:
-            data["profile"] = cls._restore_node_profile(data["profile"])
-        return ProbeData(**data)
+        return make_node_identity(node)
 
     @classmethod
     async def init_db(cls) -> None:
@@ -154,7 +84,7 @@ class ProbeCache:
 
         try:
             data = json.loads(probe_json)
-            return cls._restore_probe_data(data)
+            return restore_probe_data(data)
         except Exception as e:
             print(f"[Cache Error] Failed to load cache for {node.remark}: {e}")
             return None
@@ -171,7 +101,7 @@ class ProbeCache:
         await cls.init_db()
         fingerprint = cls.make_node_fingerprint(node)
         node_identity = cls.make_node_identity(node)
-        probe_json = json.dumps(asdict(probe_data), ensure_ascii=False)
+        probe_json = probe_data_to_json(probe_data)
         now = int(time.time())
         expires_at = now + int(settings.PROBE_CACHE_TTL_SECONDS)
 

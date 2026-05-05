@@ -41,6 +41,8 @@ class LightweightProbe:
 
     @staticmethod
     async def fetch_ipapi(ip: str) -> tuple[str, dict | None]:
+        if not settings.IPAPI_API:
+            return "Not configured", None
         url = settings.IPAPI_API.format(ip=ip)
         try:
             async with aiohttp.ClientSession() as session:
@@ -64,6 +66,8 @@ class LightweightProbe:
 
     @staticmethod
     async def fetch_scamalytics(ip: str) -> tuple[str, dict | None]:
+        if not settings.SCAMALYTICS_API:
+            return "Not configured", None
         url = settings.SCAMALYTICS_API.format(ip=ip)
         try:
             async with aiohttp.ClientSession() as session:

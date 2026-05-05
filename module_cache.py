@@ -13,7 +13,7 @@ from settings import settings
 class ProbeCache:
     _init_lock = asyncio.Lock()
     _write_lock = asyncio.Lock()
-    _initialized = False
+    _initialized_paths: set[str] = set()
 
     @staticmethod
     def make_node_fingerprint(node: VlessNode) -> str:
@@ -25,14 +25,14 @@ class ProbeCache:
 
     @classmethod
     async def init_db(cls) -> None:
-        if cls._initialized:
+        db_path = settings.CACHE_DB_PATH
+        if db_path in cls._initialized_paths:
             return
 
         async with cls._init_lock:
-            if cls._initialized:
+            if db_path in cls._initialized_paths:
                 return
 
-            db_path = settings.CACHE_DB_PATH
             db_dir = os.path.dirname(db_path)
             if db_dir:
                 os.makedirs(db_dir, exist_ok=True)
@@ -55,7 +55,7 @@ class ProbeCache:
             finally:
                 conn.close()
 
-            cls._initialized = True
+            cls._initialized_paths.add(db_path)
 
     @classmethod
     async def get(cls, node: VlessNode) -> ProbeData | None:

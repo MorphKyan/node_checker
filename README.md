@@ -106,6 +106,15 @@ python -m pip install -r requirements.txt
 
 项目会使用本地 `sing-box.exe` 启动临时代理隧道。如果文件不存在，现有 setup 流程会尝试准备运行环境。
 
+## 可选 API 配置
+
+默认会查询 `ipwho.is`，并在未配置密钥时跳过需要专用凭据的 Scamalytics。需要启用更多 IP 情报源时，通过环境变量配置，不要把密钥写入仓库：
+
+```powershell
+$env:IPAPI_KEY="your-ipapi-key"
+$env:SCAMALYTICS_API="https://api13.scamalytics.com/v3/<account>/?key=<key>&ip={ip}"
+```
+
 ## CLI 使用
 
 启动交互式检测：

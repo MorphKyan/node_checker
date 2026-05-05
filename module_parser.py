@@ -2,6 +2,7 @@ import base64
 import urllib.parse
 from models import VlessNode
 import aiohttp
+from settings import settings
 
 GEO_MAP = {
     "hk": "HK", "香港": "HK", "hongkong": "HK",
@@ -17,7 +18,8 @@ GEO_MAP = {
 class VlessParser:
     @staticmethod
     async def fetch_subscription(url: str) -> str:
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=settings.API_TIMEOUT)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as resp:
                 resp.raise_for_status()
                 return await resp.text()

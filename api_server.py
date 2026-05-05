@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -14,7 +15,16 @@ from module_subscription_exporter import SubscriptionExporter
 from module_subscription_service import SubscriptionRefreshService
 
 
-app = FastAPI(title="Vless Node Checker API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    RuntimeSettings.load()
+    ApiStore.init_db()
+    await ProbeCache.init_db()
+    yield
+
+
+app = FastAPI(title="Vless Node Checker API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -54,13 +64,6 @@ class RuntimeSettingsRequest(BaseModel):
     SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: Optional[int] = Field(default=None, ge=32, le=240)
     TTFB_TARGET_URL: Optional[str] = Field(default=None, min_length=1)
     SPEEDTEST_URL: Optional[str] = Field(default=None, min_length=1)
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    RuntimeSettings.load()
-    ApiStore.init_db()
-    await ProbeCache.init_db()
 
 
 def ensure_subscription(subscription_id: str) -> dict:

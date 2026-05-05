@@ -311,6 +311,8 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["subscription_id"], subscription["id"])
+        self.assertEqual(payload["subscription_status"], "new")
+        self.assertIsNone(payload["last_job_id"])
         self.assertEqual(payload["node_count"], 1)
         node = payload["nodes"][0]
         self.assertEqual(node["probe"]["network_labels"], ["机房"])

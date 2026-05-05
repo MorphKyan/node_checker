@@ -59,6 +59,8 @@ export interface NodeResult {
 export interface SubscriptionResults {
   subscription_id: string;
   status: "completed";
+  subscription_status: Status;
+  last_job_id?: string | null;
   node_count: number;
   valid_count: number;
   updated_at: number;

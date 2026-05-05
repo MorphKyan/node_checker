@@ -219,6 +219,11 @@ async def get_settings() -> dict:
     return RuntimeSettings.get_editable()
 
 
+@app.get("/settings/metadata")
+async def get_settings_metadata() -> dict:
+    return RuntimeSettings.get_metadata()
+
+
 @app.patch("/settings")
 async def update_settings(payload: RuntimeSettingsRequest) -> dict:
     data = payload.model_dump(exclude_unset=True)

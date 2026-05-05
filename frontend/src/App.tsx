@@ -42,6 +42,7 @@ import type {
   LocalPreferences,
   NodeResult,
   RuntimeSettings,
+  RuntimeSettingsMetadata,
   SubscriptionResults,
   SubscriptionSummary,
 } from "./types";
@@ -181,6 +182,10 @@ export default function App() {
   const settingsQuery = useQuery({
     queryKey: ["settings", preferences.apiBaseUrl],
     queryFn: api.getSettings,
+  });
+  const settingsMetadataQuery = useQuery({
+    queryKey: ["settings-metadata", preferences.apiBaseUrl],
+    queryFn: api.getSettingsMetadata,
   });
 
   const updateSettings = useMutation({
@@ -363,6 +368,7 @@ export default function App() {
           {view === "settings" && (
             <SettingsView
               settings={settingsQuery.data}
+              metadata={settingsMetadataQuery.data}
               preferences={preferences}
               onSaveSettings={(next) => updateSettings.mutate(next)}
               onPreferences={setPreferences}
@@ -697,7 +703,7 @@ function ExportView(props: {
   );
 }
 
-function SettingsView({ settings, preferences, onSaveSettings, onPreferences, onReset }: { settings?: RuntimeSettings; preferences: LocalPreferences; onSaveSettings: (settings: Partial<RuntimeSettings>) => void; onPreferences: (preferences: LocalPreferences) => void; onReset: () => void }) {
+function SettingsView({ settings, metadata, preferences, onSaveSettings, onPreferences, onReset }: { settings?: RuntimeSettings; metadata?: RuntimeSettingsMetadata; preferences: LocalPreferences; onSaveSettings: (settings: Partial<RuntimeSettings>) => void; onPreferences: (preferences: LocalPreferences) => void; onReset: () => void }) {
   const [draft, setDraft] = useState<Partial<RuntimeSettings>>({});
   const current = { ...(settings || {}), ...draft } as RuntimeSettings;
   const hasDraft = Object.keys(draft).length > 0;
@@ -707,14 +713,14 @@ function SettingsView({ settings, preferences, onSaveSettings, onPreferences, on
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><SlidersHorizontal className="h-4 w-4 text-blue-600" />后端运行设置</div>
         {!settings ? <EmptyState title="设置加载中" /> : (
           <div className="grid grid-cols-2 gap-3">
-            <SettingNumber label="过滤并发" value={current.FILTER_CONCURRENCY} onChange={(value) => setDraft({ ...draft, FILTER_CONCURRENCY: value })} />
-            <SettingNumber label="测速并发" value={current.SPEEDTEST_CONCURRENCY} onChange={(value) => setDraft({ ...draft, SPEEDTEST_CONCURRENCY: value })} />
-            <SettingNumber label="默认测速数量" value={current.API_DEFAULT_SPEEDTEST_LIMIT} onChange={(value) => setDraft({ ...draft, API_DEFAULT_SPEEDTEST_LIMIT: value })} />
-            <SettingNumber label="缓存 TTL 秒" value={current.PROBE_CACHE_TTL_SECONDS} onChange={(value) => setDraft({ ...draft, PROBE_CACHE_TTL_SECONDS: value })} />
-            <SettingNumber label="订阅最大字节" value={current.SUBSCRIPTION_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_MAX_BYTES: value })} />
-            <SettingNumber label="测速最大字节" value={current.SPEEDTEST_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SPEEDTEST_MAX_BYTES: value })} />
-            <SettingNumber label="compact 长度" value={current.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: value })} />
-            <SettingNumber label="detailed 长度" value={current.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: value })} />
+            <SettingNumber label="过滤并发" metadata={metadata?.FILTER_CONCURRENCY} value={current.FILTER_CONCURRENCY} onChange={(value) => setDraft({ ...draft, FILTER_CONCURRENCY: value })} />
+            <SettingNumber label="测速并发" metadata={metadata?.SPEEDTEST_CONCURRENCY} value={current.SPEEDTEST_CONCURRENCY} onChange={(value) => setDraft({ ...draft, SPEEDTEST_CONCURRENCY: value })} />
+            <SettingNumber label="默认测速数量" metadata={metadata?.API_DEFAULT_SPEEDTEST_LIMIT} value={current.API_DEFAULT_SPEEDTEST_LIMIT} onChange={(value) => setDraft({ ...draft, API_DEFAULT_SPEEDTEST_LIMIT: value })} />
+            <SettingNumber label="缓存 TTL 秒" metadata={metadata?.PROBE_CACHE_TTL_SECONDS} value={current.PROBE_CACHE_TTL_SECONDS} onChange={(value) => setDraft({ ...draft, PROBE_CACHE_TTL_SECONDS: value })} />
+            <SettingNumber label="订阅最大字节" metadata={metadata?.SUBSCRIPTION_MAX_BYTES} value={current.SUBSCRIPTION_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_MAX_BYTES: value })} />
+            <SettingNumber label="测速最大字节" metadata={metadata?.SPEEDTEST_MAX_BYTES} value={current.SPEEDTEST_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SPEEDTEST_MAX_BYTES: value })} />
+            <SettingNumber label="compact 长度" metadata={metadata?.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH} value={current.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: value })} />
+            <SettingNumber label="detailed 长度" metadata={metadata?.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH} value={current.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: value })} />
             <div><Label>缓存开关</Label><Select className="mt-1 w-full" value={String(current.CACHE_ENABLED)} onChange={(event) => setDraft({ ...draft, CACHE_ENABLED: event.target.value === "true" })}><option value="true">开启</option><option value="false">关闭</option></Select></div>
             <div><Label>缓存失败结果</Label><Select className="mt-1 w-full" value={String(current.CACHE_FAILURE_RESULTS)} onChange={(event) => setDraft({ ...draft, CACHE_FAILURE_RESULTS: event.target.value === "true" })}><option value="false">关闭</option><option value="true">开启</option></Select></div>
             <div className="col-span-2"><Label>TTFB URL</Label><Input className="mt-1" value={current.TTFB_TARGET_URL || ""} onChange={(event) => setDraft({ ...draft, TTFB_TARGET_URL: event.target.value })} /></div>
@@ -737,8 +743,9 @@ function SettingsView({ settings, preferences, onSaveSettings, onPreferences, on
   );
 }
 
-function SettingNumber({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  return <div><Label>{label}</Label><Input className="mt-1" type="number" value={value ?? 0} onChange={(event) => onChange(Number(event.target.value))} /></div>;
+function SettingNumber({ label, value, metadata, onChange }: { label: string; value: number; metadata?: { min?: number; max?: number }; onChange: (value: number) => void }) {
+  const inputId = `setting-${label}`;
+  return <div><Label htmlFor={inputId}>{label}</Label><Input id={inputId} className="mt-1" type="number" min={metadata?.min} max={metadata?.max} value={value ?? 0} onChange={(event) => onChange(Number(event.target.value))} /></div>;
 }
 
 function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }) {

@@ -22,6 +22,22 @@ describe("api client", () => {
     );
   });
 
+  it("loads settings metadata", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      FILTER_CONCURRENCY: { type: "int", min: 1, max: 100 },
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })));
+
+    const client = createApiClient("http://api.local");
+    const result = await client.getSettingsMetadata();
+
+    expect(result.FILTER_CONCURRENCY?.min).toBe(1);
+    expect(fetch).toHaveBeenCalledWith("http://api.local/settings/metadata", expect.any(Object));
+    vi.unstubAllGlobals();
+  });
+
   it("encodes path parameters", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ nodes: [] }), {
       status: 200,

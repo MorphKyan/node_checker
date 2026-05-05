@@ -13,6 +13,12 @@ describe("App", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/settings")) {
+        if (url.includes("/settings/metadata")) {
+          return new Response(JSON.stringify({
+            FILTER_CONCURRENCY: { type: "int", min: 1, max: 100 },
+            PROBE_CACHE_TTL_SECONDS: { type: "int", min: 60 },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
         return new Response(JSON.stringify({
           FILTER_CONCURRENCY: 10,
           SPEEDTEST_CONCURRENCY: 2,
@@ -46,6 +52,11 @@ describe("App", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/settings")) {
+        if (url.includes("/settings/metadata")) {
+          return new Response(JSON.stringify({
+            FILTER_CONCURRENCY: { type: "int", min: 1, max: 100 },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
         return new Response(JSON.stringify({
           FILTER_CONCURRENCY: 10,
           SPEEDTEST_CONCURRENCY: 2,
@@ -82,5 +93,50 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /添加并检测/ }));
 
     expect(await screen.findByText("404: Subscription source not found")).toBeInTheDocument();
+  });
+
+  it("applies settings metadata to numeric inputs", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/settings/metadata")) {
+        return new Response(JSON.stringify({
+          FILTER_CONCURRENCY: { type: "int", min: 1, max: 100 },
+          PROBE_CACHE_TTL_SECONDS: { type: "int", min: 60 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/settings")) {
+        return new Response(JSON.stringify({
+          FILTER_CONCURRENCY: 10,
+          SPEEDTEST_CONCURRENCY: 2,
+          API_DEFAULT_SPEEDTEST_LIMIT: 3,
+          CACHE_ENABLED: true,
+          PROBE_CACHE_TTL_SECONDS: 86400,
+          CACHE_FAILURE_RESULTS: false,
+          SUBSCRIPTION_MAX_BYTES: 2097152,
+          SPEEDTEST_MAX_BYTES: 8388608,
+          SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: 64,
+          SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: 96,
+          TTFB_TARGET_URL: "http://example.com",
+          SPEEDTEST_URL: "http://example.com/file.zip",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /设置/ }));
+    const filterInput = await screen.findByLabelText("过滤并发");
+    const ttlInput = screen.getByLabelText("缓存 TTL 秒");
+
+    expect(filterInput).toHaveAttribute("min", "1");
+    expect(filterInput).toHaveAttribute("max", "100");
+    expect(ttlInput).toHaveAttribute("min", "60");
+    expect(ttlInput).not.toHaveAttribute("max");
   });
 });

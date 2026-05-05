@@ -20,6 +20,7 @@ from module_subscription_service import SubscriptionRefreshService
 async def lifespan(app: FastAPI):
     RuntimeSettings.load()
     ApiStore.init_db()
+    ApiStore.fail_stale_active_jobs("API server restarted before refresh completed")
     await ProbeCache.init_db()
     yield
 
@@ -45,7 +46,7 @@ class SubscriptionCreateRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    speedtest_limit: Optional[int] = Field(default=None, ge=0)
+    speedtest_limit: Optional[int] = Field(default=None, ge=0, le=100)
     force_probe: bool = False
 
 
@@ -56,6 +57,7 @@ class SubscriptionUpdateRequest(BaseModel):
 
 class RuntimeSettingsRequest(BaseModel):
     FILTER_CONCURRENCY: Optional[int] = Field(default=None, ge=1, le=100)
+    SPEEDTEST_CONCURRENCY: Optional[int] = Field(default=None, ge=1, le=20)
     API_DEFAULT_SPEEDTEST_LIMIT: Optional[int] = Field(default=None, ge=0, le=100)
     CACHE_ENABLED: Optional[bool] = None
     PROBE_CACHE_TTL_SECONDS: Optional[int] = Field(default=None, ge=60)

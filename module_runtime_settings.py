@@ -7,6 +7,7 @@ from settings import settings
 
 EDITABLE_SETTINGS: dict[str, type] = {
     "FILTER_CONCURRENCY": int,
+    "SPEEDTEST_CONCURRENCY": int,
     "API_DEFAULT_SPEEDTEST_LIMIT": int,
     "CACHE_ENABLED": bool,
     "PROBE_CACHE_TTL_SECONDS": int,
@@ -15,6 +16,17 @@ EDITABLE_SETTINGS: dict[str, type] = {
     "SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH": int,
     "TTFB_TARGET_URL": str,
     "SPEEDTEST_URL": str,
+}
+
+SETTING_LIMITS: dict[str, dict[str, int]] = {
+    "FILTER_CONCURRENCY": {"min": 1, "max": 100},
+    "SPEEDTEST_CONCURRENCY": {"min": 1, "max": 20},
+    "API_DEFAULT_SPEEDTEST_LIMIT": {"min": 0, "max": 100},
+    "PROBE_CACHE_TTL_SECONDS": {"min": 60},
+    "SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH": {"min": 16, "max": 160},
+    "SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH": {"min": 32, "max": 240},
+    "TTFB_TARGET_URL": {"min_length": 1},
+    "SPEEDTEST_URL": {"min_length": 1},
 }
 
 
@@ -49,10 +61,21 @@ class RuntimeSettings:
         if expected_type is int:
             if not isinstance(value, int) or isinstance(value, bool):
                 raise ValueError(f"{key} must be an integer")
+            limits = SETTING_LIMITS.get(key, {})
+            min_value = limits.get("min")
+            max_value = limits.get("max")
+            if min_value is not None and value < min_value:
+                raise ValueError(f"{key} must be greater than or equal to {min_value}")
+            if max_value is not None and value > max_value:
+                raise ValueError(f"{key} must be less than or equal to {max_value}")
             return value
         if expected_type is str:
             if not isinstance(value, str):
                 raise ValueError(f"{key} must be a string")
+            limits = SETTING_LIMITS.get(key, {})
+            min_length = limits.get("min_length")
+            if min_length is not None and len(value) < min_length:
+                raise ValueError(f"{key} must not be empty")
             return value
         return value
 

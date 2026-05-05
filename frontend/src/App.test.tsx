@@ -10,6 +10,7 @@ describe("App", () => {
       if (url.includes("/settings")) {
         return new Response(JSON.stringify({
           FILTER_CONCURRENCY: 10,
+          SPEEDTEST_CONCURRENCY: 2,
           API_DEFAULT_SPEEDTEST_LIMIT: 3,
           CACHE_ENABLED: true,
           PROBE_CACHE_TTL_SECONDS: 86400,

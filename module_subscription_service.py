@@ -117,10 +117,12 @@ class SubscriptionRefreshService:
             progress_callback("speedtest", 0, len(nodes_to_test))
 
         speed_processed = 0
+        speed_sem = asyncio.Semaphore(max(1, int(settings.SPEEDTEST_CONCURRENCY)))
 
         async def speed_with_progress(node: AnalyzedNode) -> TestedNode:
             nonlocal speed_processed
-            result = await cls.run_speed_test(node)
+            async with speed_sem:
+                result = await cls.run_speed_test(node)
             speed_processed += 1
             if progress_callback:
                 progress_callback("speedtest", speed_processed, len(nodes_to_test))
@@ -148,6 +150,7 @@ class SubscriptionRefreshService:
         subscription = ApiStore.get_subscription(subscription_id)
         if not subscription:
             raise ValueError(f"Subscription not found: {subscription_id}")
+        subscription_url = subscription["url"]
 
         ApiStore.update_job(
             job_id,
@@ -177,15 +180,13 @@ class SubscriptionRefreshService:
             force_probe=force_probe,
             progress_callback=update_progress,
         )
-        ApiStore.save_results(subscription_id, tested_nodes)
-        ApiStore.update_job(
+        if not ApiStore.save_results_if_current(
+            subscription_id,
             job_id,
-            status="completed",
-            phase="completed",
-            processed_nodes=len(nodes),
-            total_nodes=len(nodes),
-            finished_at=ApiStore.now(),
-        )
+            subscription_url,
+            tested_nodes,
+        ):
+            raise ValueError("Refresh job is no longer current; discarding results")
         return tested_nodes
 
     @classmethod
@@ -233,9 +234,18 @@ class SubscriptionRefreshService:
             speedtest_limit=max(0, int(limit)),
             force_probe=force_probe,
         )
+        coro = cls.run_job(job["id"])
         try:
-            task = asyncio.create_task(cls.run_job(job["id"]))
+            task = asyncio.create_task(coro)
             cls._running_tasks[job["id"]] = task
-        except RuntimeError:
-            pass
+        except RuntimeError as e:
+            coro.close()
+            ApiStore.update_job(
+                job["id"],
+                status="failed",
+                phase="failed",
+                error=f"Unable to schedule refresh task: {e}",
+                finished_at=ApiStore.now(),
+            )
+            return ApiStore.get_job(job["id"])
         return job

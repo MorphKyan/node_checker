@@ -17,6 +17,11 @@ GEO_MAP = {
 
 class VlessParser:
     @staticmethod
+    def is_http_source(source: str) -> bool:
+        scheme = urllib.parse.urlparse(source).scheme.lower()
+        return scheme in {"http", "https"}
+
+    @staticmethod
     async def fetch_subscription(url: str) -> str:
         timeout = aiohttp.ClientTimeout(total=settings.API_TIMEOUT)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -56,8 +61,11 @@ class VlessParser:
                     server_port_str = server_port_params
                     params_str = ""
                     
-                server_ip, server_port = server_port_str.split(':', 1)
-                server_port = int(server_port)
+                parsed_server = urllib.parse.urlsplit(f"//{server_port_str}")
+                server_ip = parsed_server.hostname
+                server_port = parsed_server.port
+                if not server_ip or server_port is None:
+                    raise ValueError("Missing server host or port")
                 
                 params = dict(urllib.parse.parse_qsl(params_str))
                 

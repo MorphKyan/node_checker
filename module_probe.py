@@ -107,6 +107,89 @@ class LightweightProbe:
             return "Error", None
 
     @staticmethod
+    def _format_api_url(template: str, ip: str, key: str = "") -> str:
+        return template.format(ip=ip, key=key)
+
+    @staticmethod
+    async def fetch_proxycheck(ip: str) -> tuple[str, dict | None]:
+        if not settings.PROXYCHECK_API:
+            return "Not configured", None
+        url = LightweightProbe._format_api_url(settings.PROXYCHECK_API, ip, settings.PROXYCHECK_KEY)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=settings.API_TIMEOUT) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        result = data.get(ip) if isinstance(data, dict) else None
+                        detections = result.get("detections", {}) if isinstance(result, dict) else {}
+                        info = []
+                        if detections.get("proxy"): info.append("Proxy")
+                        if detections.get("vpn"): info.append("VPN")
+                        if detections.get("tor"): info.append("Tor")
+                        if detections.get("hosting"): info.append("Hosting")
+                        if detections.get("compromised"): info.append("Compromised")
+                        if "risk" in detections: info.append(f"Risk:{detections.get('risk')}")
+                        return ", ".join(info) if info else "Clean", data
+                    return f"Error: {resp.status}", None
+        except asyncio.TimeoutError:
+            return "Timeout", None
+        except Exception:
+            return "Error", None
+
+    @staticmethod
+    async def fetch_abstract(ip: str) -> tuple[str, dict | None]:
+        if not settings.ABSTRACT_API_KEY:
+            return "Not configured", None
+        url = LightweightProbe._format_api_url(settings.ABSTRACT_IP_INTELLIGENCE_API, ip, settings.ABSTRACT_API_KEY)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=settings.API_TIMEOUT) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        security = data.get("security", {}) if isinstance(data, dict) else {}
+                        info = []
+                        if security.get("is_proxy"): info.append("Proxy")
+                        if security.get("is_vpn"): info.append("VPN")
+                        if security.get("is_tor"): info.append("Tor")
+                        if security.get("is_hosting"): info.append("Hosting")
+                        if security.get("is_abuse"): info.append("Abuse")
+                        return ", ".join(info) if info else "Clean", data
+                    if resp.status == 429:
+                        return "Rate limited", None
+                    return f"Error: {resp.status}", None
+        except asyncio.TimeoutError:
+            return "Timeout", None
+        except Exception:
+            return "Error", None
+
+    @staticmethod
+    async def fetch_ip2location(ip: str) -> tuple[str, dict | None]:
+        if settings.IP2LOCATION_KEY:
+            url = LightweightProbe._format_api_url(settings.IP2LOCATION_API, ip, settings.IP2LOCATION_KEY)
+        else:
+            url = f"https://api.ip2location.io/?ip={ip}&format=json"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=settings.API_TIMEOUT) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, dict) and data.get("error"):
+                            return "Error", data
+                        info = []
+                        if data.get("is_proxy"): info.append("Proxy")
+                        usage_type = data.get("usage_type")
+                        if usage_type: info.append(f"Usage:{usage_type}")
+                        proxy = data.get("proxy", {}) if isinstance(data.get("proxy"), dict) else {}
+                        proxy_type = proxy.get("proxy_type") or data.get("proxy_type")
+                        if proxy_type: info.append(f"ProxyType:{proxy_type}")
+                        return ", ".join(info) if info else "Clean", data
+                    return f"Error: {resp.status}", None
+        except asyncio.TimeoutError:
+            return "Timeout", None
+        except Exception:
+            return "Error", None
+
+    @staticmethod
     async def test_ttfb(socks5_url: str, target_url: str, times: int = None) -> float:
         if times is None: times = settings.PROBE_TEST_TIMES
         results = []
@@ -263,9 +346,15 @@ class LightweightProbe:
         ipwhois_info = ""
         ipapi_info = ""
         scamalytics_info = ""
+        proxycheck_info = ""
+        abstract_info = ""
+        ip2location_info = ""
         ipwhois_data = None
         ipapi_data = None
         scamalytics_data = None
+        proxycheck_data = None
+        abstract_data = None
+        ip2location_data = None
 
         try:
             ip_info = await LightweightProbe.fetch_ip_info(socks5_url)
@@ -297,9 +386,15 @@ class LightweightProbe:
                 if actual_ip:
                     ipapi_task = asyncio.create_task(LightweightProbe.fetch_ipapi(actual_ip))
                     scam_task = asyncio.create_task(LightweightProbe.fetch_scamalytics(actual_ip))
+                    proxycheck_task = asyncio.create_task(LightweightProbe.fetch_proxycheck(actual_ip))
+                    abstract_task = asyncio.create_task(LightweightProbe.fetch_abstract(actual_ip))
+                    ip2location_task = asyncio.create_task(LightweightProbe.fetch_ip2location(actual_ip))
                     
                     ipapi_info, ipapi_data = await ipapi_task
                     scamalytics_info, scamalytics_data = await scam_task
+                    proxycheck_info, proxycheck_data = await proxycheck_task
+                    abstract_info, abstract_data = await abstract_task
+                    ip2location_info, ip2location_data = await ip2location_task
         except asyncio.TimeoutError:
             print(f"[{node.remark}] IPWhoIs Error: Timeout")
             ipwhois_info = "Timeout"
@@ -314,7 +409,15 @@ class LightweightProbe:
             ProfileAdapters.from_ipwhois(ipwhois_data),
             ProfileAdapters.from_ipapi(ipapi_data),
             ProfileAdapters.from_scamalytics(scamalytics_data),
-        ])
+            ProfileAdapters.from_proxycheck(proxycheck_data, actual_ip),
+            ProfileAdapters.from_abstract(abstract_data),
+            ProfileAdapters.from_ip2location(ip2location_data),
+        ], source_weights={
+            "proxycheck.io": 1.3,
+            "Abstract API": 0.8,
+            "IP2Location.io": 0.6,
+        })
+        fraud_score = max(fraud_score, int(round(profile.risk_score)))
         
         return ProbeData(
             tcp_ping_ms=tcp_ping_ms,
@@ -327,6 +430,9 @@ class LightweightProbe:
             ipwhois_info=ipwhois_info,
             ipapi_info=ipapi_info,
             scamalytics_info=scamalytics_info,
+            proxycheck_info=proxycheck_info,
+            abstract_info=abstract_info,
+            ip2location_info=ip2location_info,
             trace_path=trace_path,
             is_detour=is_detour,
             is_backbone=is_backbone,

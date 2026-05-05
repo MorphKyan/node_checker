@@ -24,6 +24,12 @@ class ProbeCache:
         return make_node_identity(node)
 
     @classmethod
+    def connect(cls) -> sqlite3.Connection:
+        conn = sqlite3.connect(settings.CACHE_DB_PATH, timeout=30)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        return conn
+
+    @classmethod
     async def init_db(cls) -> None:
         db_path = settings.CACHE_DB_PATH
         if db_path in cls._initialized_paths:
@@ -37,8 +43,9 @@ class ProbeCache:
             if db_dir:
                 os.makedirs(db_dir, exist_ok=True)
 
-            conn = sqlite3.connect(db_path)
+            conn = cls.connect()
             try:
+                conn.execute("PRAGMA journal_mode = WAL")
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS probe_cache (
@@ -66,7 +73,7 @@ class ProbeCache:
         fingerprint = cls.make_node_fingerprint(node)
         now = int(time.time())
 
-        conn = sqlite3.connect(settings.CACHE_DB_PATH)
+        conn = cls.connect()
         try:
             row = conn.execute(
                 "SELECT probe_json, expires_at FROM probe_cache WHERE fingerprint = ?",
@@ -106,7 +113,7 @@ class ProbeCache:
         expires_at = now + int(settings.PROBE_CACHE_TTL_SECONDS)
 
         async with cls._write_lock:
-            conn = sqlite3.connect(settings.CACHE_DB_PATH)
+            conn = cls.connect()
             try:
                 existing = conn.execute(
                     "SELECT created_at FROM probe_cache WHERE fingerprint = ?",

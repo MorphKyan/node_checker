@@ -132,6 +132,9 @@ class ResultExporter:
 - **IPWhoIs**: `{probe.ipwhois_info}`
 - **IPApi**: `{probe.ipapi_info}`
 - **Scamalytics**: `{probe.scamalytics_info}`
+- **proxycheck.io**: `{probe.proxycheck_info}`
+- **Abstract API**: `{probe.abstract_info}`
+- **IP2Location.io**: `{probe.ip2location_info}`
 
 ### Node Profile
 - **Labels**: `{ResultExporter.format_profile_labels(probe.profile)}`

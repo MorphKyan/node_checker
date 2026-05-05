@@ -223,6 +223,169 @@ class ProfileAdapters:
             raw_summary=", ".join(summary),
         )
 
+    @staticmethod
+    def from_proxycheck(data: dict[str, Any] | None, ip: str = "") -> ApiVerdict:
+        if not data or data.get("status") != "ok":
+            return ApiVerdict("proxycheck.io", raw_summary="No successful response")
+
+        result = data.get(ip) if ip else None
+        if not isinstance(result, dict):
+            for key, value in data.items():
+                if key not in {"status", "query_time"} and isinstance(value, dict):
+                    result = value
+                    break
+        if not isinstance(result, dict):
+            return ApiVerdict("proxycheck.io", raw_summary="No IP result")
+
+        detections = result.get("detections") or {}
+        network = result.get("network") or {}
+        network_labels = []
+        risk_labels = []
+        summary = []
+
+        network_type = str(network.get("type") or "").strip()
+        network_label = _company_type_label(network_type)
+        if network_label:
+            network_labels.append(network_label)
+            summary.append(f"network.type={network_type}")
+
+        if detections.get("hosting"):
+            network_labels.append(_label("hosting", 0.85))
+            summary.append("hosting=true")
+        if detections.get("proxy"):
+            risk_labels.append(_label("proxy", 0.95))
+            summary.append("proxy=true")
+        if detections.get("vpn"):
+            risk_labels.append(_label("vpn", 0.90))
+            summary.append("vpn=true")
+        if detections.get("tor"):
+            risk_labels.append(_label("tor", 0.98))
+            summary.append("tor=true")
+        if detections.get("compromised"):
+            risk_labels.append(_label("abuser", 0.80))
+            summary.append("compromised=true")
+
+        risk = _first_number(detections.get("risk"))
+        confidence = _first_number(detections.get("confidence"))
+        if risk is not None:
+            summary.append(f"risk={risk:g}")
+        if confidence is not None:
+            summary.append(f"confidence={confidence:g}")
+
+        if not risk_labels:
+            risk_labels.append(_label("clean", 0.80 if confidence is None else min(0.90, confidence / 100)))
+            summary.append("detections clean")
+
+        return ApiVerdict(
+            source="proxycheck.io",
+            network_labels=network_labels,
+            risk_labels=risk_labels,
+            risk_score=risk if risk is not None else _estimated_risk(risk_labels + network_labels),
+            raw_summary=", ".join(summary),
+        )
+
+    @staticmethod
+    def from_abstract(data: dict[str, Any] | None) -> ApiVerdict:
+        if not data or not isinstance(data.get("security"), dict):
+            return ApiVerdict("Abstract API", raw_summary="No successful response")
+
+        security = data.get("security") or {}
+        asn = data.get("asn") or {}
+        company = data.get("company") or {}
+        network_labels = []
+        risk_labels = []
+        summary = []
+
+        company_type = str(company.get("type") or asn.get("type") or "").strip()
+        company_label = _company_type_label(company_type)
+        if company_label:
+            network_labels.append(company_label)
+            summary.append(f"company.type={company_type}")
+
+        if security.get("is_hosting"):
+            network_labels.append(_label("hosting", 0.80))
+            summary.append("is_hosting=true")
+        if security.get("is_mobile"):
+            network_labels.append(_label("mobile", 0.75))
+            summary.append("is_mobile=true")
+        if security.get("is_proxy"):
+            risk_labels.append(_label("proxy", 0.85))
+            summary.append("is_proxy=true")
+        if security.get("is_vpn"):
+            risk_labels.append(_label("vpn", 0.55))
+            summary.append("is_vpn=true")
+        if security.get("is_tor"):
+            risk_labels.append(_label("tor", 0.95))
+            summary.append("is_tor=true")
+        if security.get("is_abuse"):
+            risk_labels.append(_label("abuser", 0.80))
+            summary.append("is_abuse=true")
+
+        if not risk_labels:
+            risk_labels.append(_label("clean", 0.55))
+            summary.append("security clean")
+
+        return ApiVerdict(
+            source="Abstract API",
+            network_labels=network_labels,
+            risk_labels=risk_labels,
+            risk_score=_estimated_risk(risk_labels + network_labels),
+            raw_summary=", ".join(summary),
+        )
+
+    @staticmethod
+    def from_ip2location(data: dict[str, Any] | None) -> ApiVerdict:
+        if not data or data.get("error"):
+            return ApiVerdict("IP2Location.io", raw_summary="No successful response")
+
+        network_labels = []
+        risk_labels = []
+        summary = []
+
+        usage_type = str(data.get("usage_type") or "").strip()
+        usage_upper = usage_type.upper()
+        if usage_type:
+            summary.append(f"usage_type={usage_type}")
+        if usage_upper in {"DCH", "CDN"}:
+            network_labels.append(_label("datacenter", 0.75))
+        elif usage_upper in {"ISP", "MOB"}:
+            label = "mobile" if usage_upper == "MOB" else "likely_residential"
+            network_labels.append(_label(label, 0.60))
+        elif usage_upper in {"COM", "ORG", "EDU", "GOV", "MIL"}:
+            network_labels.append(_label("business", 0.55))
+
+        proxy = data.get("proxy") if isinstance(data.get("proxy"), dict) else {}
+        proxy_type = str(proxy.get("proxy_type") or data.get("proxy_type") or "").strip().upper()
+        if data.get("is_proxy") is True:
+            risk_labels.append(_label("proxy", 0.80))
+            summary.append("is_proxy=true")
+        if proxy_type:
+            summary.append(f"proxy_type={proxy_type}")
+        if proxy_type == "VPN":
+            risk_labels.append(_label("vpn", 0.85))
+        elif proxy_type == "TOR":
+            risk_labels.append(_label("tor", 0.95))
+        elif proxy_type in {"PUB", "WEB", "SES", "RES"}:
+            risk_labels.append(_label("proxy", 0.85))
+
+        fraud_score = _first_number(proxy.get("fraud_score") or data.get("fraud_score"))
+        if fraud_score is not None:
+            summary.append(f"fraud_score={fraud_score:g}")
+            if fraud_score >= 75 and not risk_labels:
+                risk_labels.append(_label("abuser", 0.65))
+
+        if not risk_labels:
+            risk_labels.append(_label("clean", 0.50))
+            summary.append("proxy clean")
+
+        return ApiVerdict(
+            source="IP2Location.io",
+            network_labels=network_labels,
+            risk_labels=risk_labels,
+            risk_score=fraud_score if fraud_score is not None else _estimated_risk(risk_labels + network_labels),
+            raw_summary=", ".join(summary),
+        )
+
 
 class NodeProfileAggregator:
     NETWORK_THRESHOLD = 0.50

@@ -51,6 +51,53 @@ class ProfileAdapterTests(unittest.TestCase):
         self.assertEqual([item.label for item in verdict.risk_labels], ["proxy"])
         self.assertEqual(verdict.risk_score, 82)
 
+    def test_proxycheck_tor_proxy(self):
+        verdict = ProfileAdapters.from_proxycheck({
+            "status": "ok",
+            "185.220.101.1": {
+                "network": {"type": "Business"},
+                "detections": {
+                    "proxy": True,
+                    "vpn": False,
+                    "tor": True,
+                    "hosting": False,
+                    "compromised": True,
+                    "risk": 100,
+                    "confidence": 100,
+                },
+            },
+        }, "185.220.101.1")
+
+        self.assertEqual([item.label for item in verdict.network_labels], ["business"])
+        self.assertEqual([item.label for item in verdict.risk_labels], ["proxy", "tor", "abuser"])
+        self.assertEqual(verdict.risk_score, 100)
+
+    def test_abstract_security_flags(self):
+        verdict = ProfileAdapters.from_abstract({
+            "security": {
+                "is_vpn": True,
+                "is_proxy": False,
+                "is_tor": True,
+                "is_hosting": False,
+                "is_abuse": True,
+            },
+            "company": {"type": "isp"},
+        })
+
+        self.assertEqual([item.label for item in verdict.network_labels], ["likely_residential"])
+        self.assertEqual([item.label for item in verdict.risk_labels], ["vpn", "tor", "abuser"])
+
+    def test_ip2location_basic_proxy_and_usage_type(self):
+        verdict = ProfileAdapters.from_ip2location({
+            "is_proxy": True,
+            "usage_type": "DCH",
+            "proxy": {"proxy_type": "VPN", "fraud_score": 88},
+        })
+
+        self.assertEqual([item.label for item in verdict.network_labels], ["datacenter"])
+        self.assertEqual([item.label for item in verdict.risk_labels], ["proxy", "vpn"])
+        self.assertEqual(verdict.risk_score, 88)
+
     def test_failed_api_returns_no_effective_labels(self):
         verdict = ProfileAdapters.from_ipwhois(None)
 
@@ -138,6 +185,38 @@ class NodeProfileAggregatorTests(unittest.TestCase):
 
         self.assertEqual(profile.display_labels, ["未知"])
         self.assertEqual(profile.confidence, "low")
+
+    def test_proxycheck_clean_downweights_abstract_vpn_only(self):
+        profile = NodeProfileAggregator.aggregate([
+            ProfileAdapters.from_proxycheck({
+                "status": "ok",
+                "8.8.8.8": {
+                    "detections": {
+                        "proxy": False,
+                        "vpn": False,
+                        "tor": False,
+                        "hosting": False,
+                        "risk": 0,
+                        "confidence": 100,
+                    },
+                },
+            }, "8.8.8.8"),
+            ProfileAdapters.from_abstract({
+                "security": {
+                    "is_vpn": True,
+                    "is_proxy": False,
+                    "is_tor": False,
+                    "is_hosting": False,
+                    "is_abuse": False,
+                },
+            }),
+        ], source_weights={
+            "proxycheck.io": 1.3,
+            "Abstract API": 0.8,
+        })
+
+        self.assertNotIn("VPN", profile.display_labels)
+        self.assertLess(profile.risk_score, 50)
 
 
 class ProfileExportIntegrationTests(unittest.TestCase):

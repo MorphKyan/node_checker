@@ -32,16 +32,36 @@ class RuntimeSettings:
         path = cls.path()
         if not os.path.exists(path):
             return
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        cls.apply(data, persist=False)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cls.apply(data, persist=False)
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            print(f"[RuntimeSettings] Failed to load {path}: {e}")
+
+    @staticmethod
+    def validate_value(key: str, value: Any) -> Any:
+        expected_type = EDITABLE_SETTINGS[key]
+        if expected_type is bool:
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be a boolean")
+            return value
+        if expected_type is int:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"{key} must be an integer")
+            return value
+        if expected_type is str:
+            if not isinstance(value, str):
+                raise ValueError(f"{key} must be a string")
+            return value
+        return value
 
     @classmethod
     def apply(cls, data: dict[str, Any], *, persist: bool = True) -> dict[str, Any]:
         for key, value in data.items():
             if key not in EDITABLE_SETTINGS:
                 continue
-            setattr(settings, key, value)
+            setattr(settings, key, cls.validate_value(key, value))
 
         current = cls.get_editable()
         if persist:

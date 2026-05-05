@@ -31,6 +31,21 @@ class Config:
         f"https://api.ipapi.is?q={{ip}}{'&key=' + IPAPI_KEY if IPAPI_KEY else ''}",
     )
     SCAMALYTICS_API = os.getenv("SCAMALYTICS_API", "")
+    PROXYCHECK_KEY = os.getenv("PROXYCHECK_KEY", "")
+    PROXYCHECK_API = os.getenv(
+        "PROXYCHECK_API",
+        "https://proxycheck.io/v3/{ip}" + ("?key={key}" if PROXYCHECK_KEY else ""),
+    )
+    ABSTRACT_API_KEY = os.getenv("ABSTRACT_API_KEY", "")
+    ABSTRACT_IP_INTELLIGENCE_API = os.getenv(
+        "ABSTRACT_IP_INTELLIGENCE_API",
+        "https://ip-intelligence.abstractapi.com/v1/?api_key={key}&ip_address={ip}",
+    )
+    IP2LOCATION_KEY = os.getenv("IP2LOCATION_KEY", "")
+    IP2LOCATION_API = os.getenv(
+        "IP2LOCATION_API",
+        "https://api.ip2location.io/?key={key}&ip={ip}&format=json",
+    )
     SPEEDTEST_URL = "https://dl.google.com/android/repository/platform-tools_r35.0.0-windows.zip" # ~6MB
 
     # 评分规则阈值

@@ -31,8 +31,10 @@ class ApiStore:
 
     @classmethod
     def connect(cls):
-        conn = sqlite3.connect(cls.db_path())
+        conn = sqlite3.connect(cls.db_path(), timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
         return conn
 
     @classmethod
@@ -50,6 +52,7 @@ class ApiStore:
                 return
             conn = cls.connect()
             try:
+                conn.execute("PRAGMA journal_mode = WAL")
                 conn.executescript(
                     """
                     CREATE TABLE IF NOT EXISTS subscriptions (

@@ -53,6 +53,9 @@ class ProbeData:
     ipwhois_info: str = ""
     ipapi_info: str = ""
     scamalytics_info: str = ""
+    proxycheck_info: str = ""
+    abstract_info: str = ""
+    ip2location_info: str = ""
     trace_path: str = ""
     is_detour: bool = False
     is_backbone: bool = False

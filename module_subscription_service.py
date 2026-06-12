@@ -23,6 +23,34 @@ class SubscriptionRefreshService:
     _running_tasks: dict[str, asyncio.Task] = {}
 
     @staticmethod
+    def select_speedtest_nodes_per_region(
+        analyzed_nodes: list[AnalyzedNode],
+        speedtest_limit: int,
+    ) -> tuple[list[AnalyzedNode], list[AnalyzedNode]]:
+        limit = max(0, int(speedtest_limit))
+        valid_nodes = [node for node in analyzed_nodes if node.is_valid]
+        invalid_nodes = [node for node in analyzed_nodes if not node.is_valid]
+        if limit <= 0:
+            return [], valid_nodes + invalid_nodes
+
+        nodes_by_region: dict[str, list[AnalyzedNode]] = {}
+        for node in valid_nodes:
+            region = node.probe.actual_geo or node.node.expected_geo or "Unknown"
+            nodes_by_region.setdefault(region, []).append(node)
+
+        nodes_to_test: list[AnalyzedNode] = []
+        nodes_to_skip: list[AnalyzedNode] = []
+        for region_nodes in nodes_by_region.values():
+            region_nodes.sort(key=lambda node: node.total_score, reverse=True)
+            nodes_to_test.extend(region_nodes[:limit])
+            nodes_to_skip.extend(region_nodes[limit:])
+
+        nodes_to_test.sort(key=lambda node: node.total_score, reverse=True)
+        nodes_to_skip.sort(key=lambda node: node.total_score, reverse=True)
+        nodes_to_skip.extend(invalid_nodes)
+        return nodes_to_test, nodes_to_skip
+
+    @staticmethod
     async def fetch_subscription_text(source: str) -> str:
         if VlessParser.is_http_source(source):
             return await VlessParser.fetch_subscription(source)
@@ -108,13 +136,11 @@ class SubscriptionRefreshService:
             *(filter_with_progress(node) for node in nodes)
         )
 
-        valid_nodes = [node for node in analyzed_nodes if node.is_valid]
-        valid_nodes.sort(key=lambda node: node.total_score, reverse=True)
-
         tested_nodes: list[TestedNode] = []
-        limit = max(0, int(speedtest_limit))
-        nodes_to_test = valid_nodes[:limit]
-        nodes_to_skip = valid_nodes[limit:] + [node for node in analyzed_nodes if not node.is_valid]
+        nodes_to_test, nodes_to_skip = cls.select_speedtest_nodes_per_region(
+            analyzed_nodes,
+            speedtest_limit,
+        )
 
         if progress_callback:
             progress_callback("speedtest", 0, len(nodes_to_test))
@@ -204,6 +230,9 @@ class SubscriptionRefreshService:
                 speedtest_limit=job["speedtest_limit"],
                 force_probe=bool(job["force_probe"]),
             )
+        except asyncio.CancelledError:
+            ApiStore.cancel_job(job_id)
+            raise
         except Exception as e:
             ApiStore.update_job(
                 job_id,
@@ -252,3 +281,16 @@ class SubscriptionRefreshService:
             )
             return ApiStore.get_job(job["id"])
         return job
+
+    @classmethod
+    def cancel_refresh(cls, job_id: str) -> dict | None:
+        job = ApiStore.get_job(job_id)
+        if not job:
+            return None
+
+        task = cls._running_tasks.pop(job_id, None)
+        if task and not task.done():
+            task.cancel()
+
+        canceled = ApiStore.cancel_job(job_id)
+        return canceled or ApiStore.get_job(job_id)

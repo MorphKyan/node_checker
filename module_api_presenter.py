@@ -80,6 +80,8 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                 "enhanced_name_compact": compact_name,
                 "enhanced_name_detailed": detailed_name,
                 "raw_uri": node.raw_uri,
+                "compact_uri": SubscriptionExporter.rewrite_vless_remark(node.raw_uri, compact_name),
+                "detailed_uri": SubscriptionExporter.rewrite_vless_remark(node.raw_uri, detailed_name),
                 "is_valid": analyzed.is_valid,
                 "reject_reason": analyzed.reject_reason,
                 "total_score": analyzed.total_score,

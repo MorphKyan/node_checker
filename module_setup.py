@@ -8,8 +8,10 @@ from settings import settings
 
 def setup_singbox():
     """Download and extract the latest sing-box for Windows amd64."""
-    if os.path.exists(settings.SING_BOX_PATH):
-        print(f"[Setup] sing-box already exists at {settings.SING_BOX_PATH}")
+    if (os.path.exists(settings.SING_BOX_PATH) or 
+            shutil.which(settings.SING_BOX_PATH) or 
+            shutil.which("sing-box")):
+        print(f"[Setup] sing-box already exists or is available in PATH. Skipping download.")
         return
 
     print("[Setup] Fetching latest sing-box release info...")

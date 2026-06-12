@@ -279,6 +279,24 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload["job_id"], job["id"])
         self.assertEqual(payload["status"], "queued")
 
+    def test_cancel_job_marks_active_job_canceled(self):
+        subscription = self.create_subscription_without_refresh()
+        job = ApiStore.create_refresh_job(subscription["id"], 3, False)
+
+        response = self.client.post(f"/jobs/{job['id']}/cancel")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["job_id"], job["id"])
+        self.assertEqual(payload["status"], "canceled")
+        self.assertEqual(payload["phase"], "canceled")
+        self.assertEqual(ApiStore.get_subscription(subscription["id"])["last_status"], "canceled")
+
+    def test_cancel_missing_job_returns_404(self):
+        response = self.client.post("/jobs/job_missing/cancel")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_enhanced_defaults_to_base64_subscription(self):
         subscription = self.create_subscription_without_refresh()
         self.save_result(subscription["id"])
@@ -319,6 +337,11 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(node["probe"]["type_labels"], ["Clean"])
         self.assertEqual(node["probe"]["confidence"], "high")
         self.assertIn("机房", node["enhanced_name_compact"])
+        self.assertEqual(node["raw_uri"], "vless://uuid@example.com:443?security=tls#JP")
+        self.assertIn("vless://uuid@example.com:443?security=tls#", node["compact_uri"])
+        self.assertIn("vless://uuid@example.com:443?security=tls#", node["detailed_uri"])
+        self.assertIn("%E6%9C%BA%E6%88%BF", node["compact_uri"])
+        self.assertIn("Example%20ASN", node["detailed_uri"])
 
     def test_missing_result_returns_409(self):
         subscription = self.create_subscription_without_refresh()

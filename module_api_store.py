@@ -392,7 +392,7 @@ class ApiStore:
                     values,
                 )
                 job = conn.execute(
-                    "SELECT id, subscription_id, status FROM refresh_jobs WHERE id = ?",
+                    "SELECT * FROM refresh_jobs WHERE id = ?",
                     (job_id,),
                 ).fetchone()
                 if job and status is not None:
@@ -405,6 +405,46 @@ class ApiStore:
                         (status, cls.now(), job["subscription_id"], job["id"]),
                     )
                 conn.commit()
+            finally:
+                conn.close()
+
+    @classmethod
+    def cancel_job(cls, job_id: str, reason: str = "Canceled by user") -> dict | None:
+        cls.init_db()
+        now = cls.now()
+        with cls._write_lock:
+            conn = cls.connect()
+            try:
+                job = conn.execute(
+                    "SELECT id, subscription_id, status FROM refresh_jobs WHERE id = ?",
+                    (job_id,),
+                ).fetchone()
+                if not job:
+                    return None
+                if job["status"] not in {"queued", "running"}:
+                    return dict(job)
+
+                conn.execute(
+                    """
+                    UPDATE refresh_jobs
+                    SET status = 'canceled',
+                        phase = 'canceled',
+                        error = ?,
+                        finished_at = ?
+                    WHERE id = ?
+                    """,
+                    (reason, now, job_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_status = 'canceled', updated_at = ?
+                    WHERE id = ? AND last_job_id = ?
+                    """,
+                    (now, job["subscription_id"], job_id),
+                )
+                conn.commit()
+                return cls.get_job(job_id)
             finally:
                 conn.close()
 

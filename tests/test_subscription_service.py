@@ -9,25 +9,25 @@ from module_subscription_service import SubscriptionRefreshService
 from settings import settings
 
 
-def make_node(index: int) -> VlessNode:
+def make_node(index: int, expected_geo: str = "JP") -> VlessNode:
     return VlessNode(
-        raw_uri=f"vless://uuid-{index}@example.com:443?security=tls#JP-{index}",
+        raw_uri=f"vless://uuid-{index}@example.com:443?security=tls#{expected_geo}-{index}",
         uuid=f"uuid-{index}",
         server_ip="example.com",
         server_port=443,
-        remark=f"JP-{index}",
-        expected_geo="JP",
+        remark=f"{expected_geo}-{index}",
+        expected_geo=expected_geo,
     )
 
 
-def make_analyzed_node(node: VlessNode, score: float = 90.0) -> AnalyzedNode:
+def make_analyzed_node(node: VlessNode, score: float = 90.0, actual_geo: str | None = None) -> AnalyzedNode:
     return AnalyzedNode(
         node=node,
         probe=ProbeData(
             tcp_ping_ms=80.0,
             ttfb_ms=210.0,
             actual_ip="203.0.113.10",
-            actual_geo="JP",
+            actual_geo=actual_geo or node.expected_geo,
             asn_org="Example ASN",
             fraud_score=20,
         ),
@@ -91,6 +91,30 @@ class SubscriptionRefreshServiceTests(unittest.TestCase):
         self.assertLessEqual(max_active, 2)
         self.assertEqual(len(results), 5)
         self.assertTrue(all(node.download_speed_mbps == 10.0 for node in results))
+
+    def test_select_speedtest_nodes_uses_top_nodes_per_region(self):
+        analyzed_nodes = [
+            make_analyzed_node(make_node(1, "JP"), score=95),
+            make_analyzed_node(make_node(2, "JP"), score=80),
+            make_analyzed_node(make_node(3, "JP"), score=70),
+            make_analyzed_node(make_node(4, "US"), score=90),
+            make_analyzed_node(make_node(5, "US"), score=85),
+            make_analyzed_node(make_node(6, "US"), score=60),
+        ]
+
+        nodes_to_test, nodes_to_skip = SubscriptionRefreshService.select_speedtest_nodes_per_region(
+            analyzed_nodes,
+            2,
+        )
+
+        self.assertEqual(
+            {node.node.remark for node in nodes_to_test},
+            {"JP-1", "JP-2", "US-4", "US-5"},
+        )
+        self.assertEqual(
+            {node.node.remark for node in nodes_to_skip},
+            {"JP-3", "US-6"},
+        )
 
 
 if __name__ == "__main__":

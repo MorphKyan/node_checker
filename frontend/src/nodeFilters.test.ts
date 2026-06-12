@@ -9,6 +9,8 @@ function makeNode(overrides: Partial<NodeResult>): NodeResult {
     enhanced_name_compact: "JP | 机房 | Clean | 92分",
     enhanced_name_detailed: "JP | 机房 | Clean | 92分 | Example ASN",
     raw_uri: "vless://uuid@example.com:443#JP",
+    compact_uri: "vless://uuid@example.com:443#JP%20%7C%20%E6%9C%BA%E6%88%BF%20%7C%20Clean%20%7C%2092%E5%88%86",
+    detailed_uri: "vless://uuid@example.com:443#JP%20%7C%20%E6%9C%BA%E6%88%BF%20%7C%20Clean%20%7C%2092%E5%88%86%20%7C%20Example%20ASN",
     is_valid: true,
     reject_reason: "",
     total_score: 92,

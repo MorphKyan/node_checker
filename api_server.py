@@ -214,6 +214,14 @@ async def get_job(job_id: str) -> dict:
     return normalize_job(job)
 
 
+@app.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str) -> dict:
+    job = SubscriptionRefreshService.cancel_refresh(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return normalize_job(job)
+
+
 @app.get("/settings")
 async def get_settings() -> dict:
     return RuntimeSettings.get_editable()

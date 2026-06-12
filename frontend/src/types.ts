@@ -1,5 +1,5 @@
-export type Status = "new" | "queued" | "running" | "completed" | "failed";
-export type Phase = "queued" | "fetch" | "filter" | "speedtest" | "completed" | "failed";
+export type Status = "new" | "queued" | "running" | "completed" | "failed" | "canceled";
+export type Phase = "queued" | "fetch" | "filter" | "speedtest" | "completed" | "failed" | "canceled";
 export type ExportMode = "compact" | "detailed";
 export type ExportFormat = "base64" | "plain";
 
@@ -49,6 +49,8 @@ export interface NodeResult {
   enhanced_name_compact: string;
   enhanced_name_detailed: string;
   raw_uri: string;
+  compact_uri: string;
+  detailed_uri: string;
   is_valid: boolean;
   reject_reason: string;
   total_score: number;

@@ -38,6 +38,31 @@ describe("api client", () => {
     vi.unstubAllGlobals();
   });
 
+  it("cancels jobs", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      job_id: "job_1",
+      subscription_id: "sub_1",
+      status: "canceled",
+      phase: "canceled",
+      processed_nodes: 0,
+      total_nodes: 0,
+      error: "Canceled by user",
+      created_at: 1,
+      started_at: null,
+      finished_at: 2,
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })));
+
+    const client = createApiClient("http://api.local");
+    const result = await client.cancelJob("job_1");
+
+    expect(result.status).toBe("canceled");
+    expect(fetch).toHaveBeenCalledWith("http://api.local/jobs/job_1/cancel", expect.objectContaining({ method: "POST" }));
+    vi.unstubAllGlobals();
+  });
+
   it("encodes path parameters", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ nodes: [] }), {
       status: 200,

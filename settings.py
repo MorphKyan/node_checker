@@ -2,6 +2,10 @@ import json
 import os
 from pathlib import Path
 
+from console_encoding import configure_standard_streams
+
+configure_standard_streams()
+
 BASE_DIR = Path(__file__).resolve().parent
 
 class Config:
@@ -56,7 +60,7 @@ class Config:
 
     # 本地探测结果缓存
     CACHE_ENABLED = True
-    CACHE_DB_PATH = "cache/probe_cache.sqlite3"
+    CACHE_DB_PATH = os.getenv("CACHE_DB_PATH", "cache/probe_cache.sqlite3")
     PROBE_CACHE_TTL_SECONDS = 24 * 60 * 60
     CACHE_FAILURE_RESULTS = False
 
@@ -68,11 +72,11 @@ class Config:
     SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH = 96
 
     # 本地 API 服务
-    API_DB_PATH = "data/api.sqlite3"
+    API_DB_PATH = os.getenv("API_DB_PATH", "data/api.sqlite3")
     API_HOST = "127.0.0.1"
     API_PORT = 8000
     API_DEFAULT_SPEEDTEST_LIMIT = 3
-    RUNTIME_SETTINGS_PATH = "data/runtime_settings.json"
+    RUNTIME_SETTINGS_PATH = os.getenv("RUNTIME_SETTINGS_PATH", "data/runtime_settings.json")
 
     @classmethod
     def load_from_file(cls, filepath="config.json"):

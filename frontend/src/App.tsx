@@ -18,6 +18,7 @@ import {
   Settings,
   SlidersHorizontal,
   Trash2,
+  XCircle,
 } from "lucide-react";
 import {
   Bar,
@@ -61,8 +62,8 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
 
 const chartColors = ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#64748b"];
 
-function copyText(text: string): void {
-  void navigator.clipboard?.writeText(text);
+async function copyText(text: string): Promise<void> {
+  await navigator.clipboard?.writeText(text);
 }
 
 function downloadText(filename: string, text: string): void {
@@ -174,6 +175,15 @@ export default function App() {
     onSuccess: () => {
       setOperationError("");
       setView("jobs");
+      void queryClient.invalidateQueries();
+    },
+    onError: (error) => setOperationError(errorMessage(error)),
+  });
+
+  const cancelJob = useMutation({
+    mutationFn: api.cancelJob,
+    onSuccess: () => {
+      setOperationError("");
       void queryClient.invalidateQueries();
     },
     onError: (error) => setOperationError(errorMessage(error)),
@@ -346,7 +356,7 @@ export default function App() {
             />
           )}
 
-          {view === "jobs" && <JobsView subscriptions={subscriptionList} jobs={jobList} />}
+          {view === "jobs" && <JobsView subscriptions={subscriptionList} jobs={jobList} cancelingJobId={cancelJob.variables || ""} onCancelJob={(jobId) => cancelJob.mutate(jobId)} />}
 
           {view === "export" && (
             <ExportView
@@ -498,7 +508,7 @@ function SubscriptionsView(props: {
         <div className="mb-3 flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-900">订阅列表</div>
           <div className="flex items-center gap-2">
-            <Label>自定义测速数量</Label>
+            <Label>自定义每区域测速数量</Label>
             <Input className="w-20" type="number" min={0} max={100} step={1} value={props.customSpeedLimit} onChange={(event) => props.onCustomSpeedLimit(Number(event.target.value))} />
           </div>
         </div>
@@ -565,6 +575,16 @@ function NodesView(props: {
   onPage: (page: number) => void;
   onDetails: (node: NodeResult) => void;
 }) {
+  const [copiedKey, setCopiedKey] = useState("");
+
+  async function copyNodeUri(key: string, uri: string) {
+    await copyText(uri);
+    setCopiedKey(key);
+    window.setTimeout(() => {
+      setCopiedKey((current) => (current === key ? "" : current));
+    }, 1500);
+  }
+
   return (
     <div className="space-y-4">
       <Panel>
@@ -605,22 +625,34 @@ function NodesView(props: {
                 </tr>
               </thead>
               <tbody>
-                {props.pagedNodes.map((node) => (
-                  <tr key={node.fingerprint} className="border-t border-border">
-                    <td className="px-3 py-3"><Badge tone={node.is_valid ? "green" : "red"}>{node.is_valid ? "有效" : "失败"}</Badge></td>
-                    <td className="max-w-xs truncate px-3 py-3 font-medium">{node.enhanced_name_compact}</td>
-                    <td className="px-3 py-3">{node.probe.actual_geo}</td>
-                    <td className="px-3 py-3">{node.probe.network_labels.join("/") || "-"}</td>
-                    <td className="px-3 py-3">{node.probe.type_labels.join("/") || "-"}</td>
-                    <td className="px-3 py-3">{node.total_score.toFixed(1)}</td>
-                    <td className="px-3 py-3">{node.probe.risk_score.toFixed(1)}</td>
-                    <td className="px-3 py-3">{node.probe.tcp_ping_ms.toFixed(0)}</td>
-                    <td className="px-3 py-3">{node.probe.ttfb_ms.toFixed(0)}</td>
-                    <td className="px-3 py-3">{node.download_speed_mbps.toFixed(2)}</td>
-                    <td className="max-w-xs truncate px-3 py-3">{node.probe.asn_org}</td>
-                    <td className="px-3 py-3"><div className="flex gap-2"><Button variant="ghost" onClick={() => copyText(node.raw_uri)}>原始</Button><Button variant="ghost" onClick={() => copyText(node.enhanced_name_compact)}>compact</Button><Button variant="ghost" onClick={() => copyText(node.enhanced_name_detailed)}>detailed</Button><Button variant="secondary" onClick={() => props.onDetails(node)}>详情</Button></div></td>
-                  </tr>
-                ))}
+                {props.pagedNodes.map((node) => {
+                  const rawKey = `${node.fingerprint}:raw`;
+                  const compactKey = `${node.fingerprint}:compact`;
+                  const detailedKey = `${node.fingerprint}:detailed`;
+                  return (
+                    <tr key={node.fingerprint} className="border-t border-border">
+                      <td className="px-3 py-3"><Badge tone={node.is_valid ? "green" : "red"}>{node.is_valid ? "有效" : "失败"}</Badge></td>
+                      <td className="max-w-xs truncate px-3 py-3 font-medium">{node.enhanced_name_compact}</td>
+                      <td className="px-3 py-3">{node.probe.actual_geo}</td>
+                      <td className="px-3 py-3">{node.probe.network_labels.join("/") || "-"}</td>
+                      <td className="px-3 py-3">{node.probe.type_labels.join("/") || "-"}</td>
+                      <td className="px-3 py-3">{node.total_score.toFixed(1)}</td>
+                      <td className="px-3 py-3">{node.probe.risk_score.toFixed(1)}</td>
+                      <td className="px-3 py-3">{node.probe.tcp_ping_ms.toFixed(0)}</td>
+                      <td className="px-3 py-3">{node.probe.ttfb_ms.toFixed(0)}</td>
+                      <td className="px-3 py-3">{node.download_speed_mbps.toFixed(2)}</td>
+                      <td className="max-w-xs truncate px-3 py-3">{node.probe.asn_org}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex gap-2">
+                          <Button variant="ghost" onClick={() => void copyNodeUri(rawKey, node.raw_uri)}>{copiedKey === rawKey ? "已复制" : "原始"}</Button>
+                          <Button variant="ghost" onClick={() => void copyNodeUri(compactKey, node.compact_uri)}>{copiedKey === compactKey ? "已复制" : "compact"}</Button>
+                          <Button variant="ghost" onClick={() => void copyNodeUri(detailedKey, node.detailed_uri)}>{copiedKey === detailedKey ? "已复制" : "detailed"}</Button>
+                          <Button variant="secondary" onClick={() => props.onDetails(node)}>详情</Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -639,7 +671,7 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
   return <div><Label>{label}</Label><Select className="mt-1 w-full" value={value} onChange={(event) => onChange(event.target.value)}>{options.map(([key, text]) => <option key={key} value={key}>{text}</option>)}</Select></div>;
 }
 
-function JobsView({ subscriptions, jobs }: { subscriptions: SubscriptionSummary[]; jobs: JobStatus[] }) {
+function JobsView({ subscriptions, jobs, cancelingJobId, onCancelJob }: { subscriptions: SubscriptionSummary[]; jobs: JobStatus[]; cancelingJobId: string; onCancelJob: (jobId: string) => void }) {
   const nameById = new Map(subscriptions.map((subscription) => [subscription.id, subscription.name]));
   return (
     <Panel>
@@ -648,11 +680,15 @@ function JobsView({ subscriptions, jobs }: { subscriptions: SubscriptionSummary[
         <div className="space-y-3">
           {jobs.map((job) => {
             const percent = job.total_nodes ? Math.round((job.processed_nodes / job.total_nodes) * 100) : 0;
+            const canCancel = job.status === "queued" || job.status === "running";
             return (
               <div key={job.job_id} className="rounded-lg border border-border p-3">
                 <div className="flex items-center justify-between">
                   <div><div className="font-medium">{nameById.get(job.subscription_id) || job.subscription_id}</div><div className="text-xs text-slate-500">{job.job_id}</div></div>
-                  <Badge tone={statusTone(job.status)}>{job.status}</Badge>
+                  <div className="flex items-center gap-2">
+                    {canCancel && <Button variant="secondary" disabled={cancelingJobId === job.job_id} onClick={() => onCancelJob(job.job_id)}><XCircle className="h-4 w-4" />取消</Button>}
+                    <Badge tone={statusTone(job.status)}>{job.status}</Badge>
+                  </div>
                 </div>
                 <div className="mt-3 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-blue-600" style={{ width: `${percent}%` }} /></div>
                 <div className="mt-2 grid grid-cols-6 gap-3 text-xs text-slate-600">
@@ -715,7 +751,7 @@ function SettingsView({ settings, metadata, preferences, onSaveSettings, onPrefe
           <div className="grid grid-cols-2 gap-3">
             <SettingNumber label="过滤并发" metadata={metadata?.FILTER_CONCURRENCY} value={current.FILTER_CONCURRENCY} onChange={(value) => setDraft({ ...draft, FILTER_CONCURRENCY: value })} />
             <SettingNumber label="测速并发" metadata={metadata?.SPEEDTEST_CONCURRENCY} value={current.SPEEDTEST_CONCURRENCY} onChange={(value) => setDraft({ ...draft, SPEEDTEST_CONCURRENCY: value })} />
-            <SettingNumber label="默认测速数量" metadata={metadata?.API_DEFAULT_SPEEDTEST_LIMIT} value={current.API_DEFAULT_SPEEDTEST_LIMIT} onChange={(value) => setDraft({ ...draft, API_DEFAULT_SPEEDTEST_LIMIT: value })} />
+            <SettingNumber label="每区域默认测速数量" metadata={metadata?.API_DEFAULT_SPEEDTEST_LIMIT} value={current.API_DEFAULT_SPEEDTEST_LIMIT} onChange={(value) => setDraft({ ...draft, API_DEFAULT_SPEEDTEST_LIMIT: value })} />
             <SettingNumber label="缓存 TTL 秒" metadata={metadata?.PROBE_CACHE_TTL_SECONDS} value={current.PROBE_CACHE_TTL_SECONDS} onChange={(value) => setDraft({ ...draft, PROBE_CACHE_TTL_SECONDS: value })} />
             <SettingNumber label="订阅最大字节" metadata={metadata?.SUBSCRIPTION_MAX_BYTES} value={current.SUBSCRIPTION_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_MAX_BYTES: value })} />
             <SettingNumber label="测速最大字节" metadata={metadata?.SPEEDTEST_MAX_BYTES} value={current.SPEEDTEST_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SPEEDTEST_MAX_BYTES: value })} />

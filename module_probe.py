@@ -1,5 +1,8 @@
 import asyncio
+import ipaddress
+import socket
 import time
+import urllib.parse
 from aiohttp_socks import ProxyConnector
 import aiohttp
 from models import VlessNode, ProbeData
@@ -38,6 +41,46 @@ class LightweightProbe:
             async with session.get(settings.IPWHOIS_API, timeout=settings.API_TIMEOUT) as resp:
                 resp.raise_for_status()
                 return await resp.json()
+
+    @staticmethod
+    async def resolve_probe_target_ip(host: str) -> str:
+        try:
+            return str(ipaddress.ip_address(host))
+        except ValueError:
+            pass
+
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        for family, _, _, _, sockaddr in infos:
+            if family in {socket.AF_INET, socket.AF_INET6}:
+                return str(sockaddr[0])
+        return host
+
+    @staticmethod
+    def _ipwhois_url(ip: str) -> str:
+        return urllib.parse.urljoin(settings.IPWHOIS_API.rstrip("/") + "/", ip)
+
+    @staticmethod
+    async def fetch_ipwhois_direct(ip: str) -> tuple[str, dict | None]:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(LightweightProbe._ipwhois_url(ip), timeout=settings.API_TIMEOUT) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("success") is True:
+                            security = data.get("security", {})
+                            info = []
+                            if security.get("proxy"): info.append("Proxy")
+                            if security.get("vpn"): info.append("VPN")
+                            if security.get("tor"): info.append("Tor")
+                            if security.get("hosting"): info.append("Hosting")
+                            return ", ".join(info) if info else "Clean", data
+                        return "Error", data
+                    return f"Error: {resp.status}", None
+        except asyncio.TimeoutError:
+            return "Timeout", None
+        except Exception:
+            return "Error", None
 
     @staticmethod
     async def fetch_ipapi(ip: str) -> tuple[str, dict | None]:
@@ -383,24 +426,36 @@ class LightweightProbe:
                 ipwhois_info = risk_tags
                 
                 # If we got actual IP, query the other APIs
-                if actual_ip:
-                    ipapi_task = asyncio.create_task(LightweightProbe.fetch_ipapi(actual_ip))
-                    scam_task = asyncio.create_task(LightweightProbe.fetch_scamalytics(actual_ip))
-                    proxycheck_task = asyncio.create_task(LightweightProbe.fetch_proxycheck(actual_ip))
-                    abstract_task = asyncio.create_task(LightweightProbe.fetch_abstract(actual_ip))
-                    ip2location_task = asyncio.create_task(LightweightProbe.fetch_ip2location(actual_ip))
-                    
-                    ipapi_info, ipapi_data = await ipapi_task
-                    scamalytics_info, scamalytics_data = await scam_task
-                    proxycheck_info, proxycheck_data = await proxycheck_task
-                    abstract_info, abstract_data = await abstract_task
-                    ip2location_info, ip2location_data = await ip2location_task
         except asyncio.TimeoutError:
             print(f"[{node.remark}] IPWhoIs Error: Timeout")
             ipwhois_info = "Timeout"
         except Exception as e:
             print(f"[{node.remark}] IPWhoIs Error: {repr(e)}")
             ipwhois_info = "Error"
+
+        if not actual_ip:
+            try:
+                actual_ip = await LightweightProbe.resolve_probe_target_ip(node.server_ip)
+                ipwhois_info, ipwhois_data = await LightweightProbe.fetch_ipwhois_direct(actual_ip)
+                if ipwhois_data and ipwhois_data.get("success") is True:
+                    actual_geo = ipwhois_data.get("country_code", "Unknown")
+                    connection = ipwhois_data.get("connection", {})
+                    asn_org = connection.get("org", "")
+            except Exception as e:
+                print(f"[{node.remark}] Direct IP intelligence fallback failed: {repr(e)}")
+
+        if actual_ip:
+            ipapi_task = asyncio.create_task(LightweightProbe.fetch_ipapi(actual_ip))
+            scam_task = asyncio.create_task(LightweightProbe.fetch_scamalytics(actual_ip))
+            proxycheck_task = asyncio.create_task(LightweightProbe.fetch_proxycheck(actual_ip))
+            abstract_task = asyncio.create_task(LightweightProbe.fetch_abstract(actual_ip))
+            ip2location_task = asyncio.create_task(LightweightProbe.fetch_ip2location(actual_ip))
+
+            ipapi_info, ipapi_data = await ipapi_task
+            scamalytics_info, scamalytics_data = await scam_task
+            proxycheck_info, proxycheck_data = await proxycheck_task
+            abstract_info, abstract_data = await abstract_task
+            ip2location_info, ip2location_data = await ip2location_task
 
         tcp_ping_ms = await tcp_ping_task
         

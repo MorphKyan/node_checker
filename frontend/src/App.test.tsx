@@ -132,10 +132,12 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /设置/ }));
     const filterInput = await screen.findByLabelText("过滤并发");
+    const speedtestLimitInput = screen.getByLabelText("每区域默认测速数量");
     const ttlInput = screen.getByLabelText("缓存 TTL 秒");
 
     expect(filterInput).toHaveAttribute("min", "1");
     expect(filterInput).toHaveAttribute("max", "100");
+    expect(speedtestLimitInput).toBeInTheDocument();
     expect(ttlInput).toHaveAttribute("min", "60");
     expect(ttlInput).not.toHaveAttribute("max");
   });

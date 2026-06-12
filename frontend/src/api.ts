@@ -47,6 +47,7 @@ export interface ApiClient {
   deleteSubscription(id: string): Promise<{ deleted: boolean; subscription_id: string }>;
   refreshSubscription(id: string, input: { speedtest_limit?: number; force_probe?: boolean }): Promise<{ subscription_id: string; job_id: string; status: string }>;
   getJob(id: string): Promise<JobStatus>;
+  cancelJob(id: string): Promise<JobStatus>;
   getResults(id: string): Promise<SubscriptionResults>;
   getEnhanced(id: string, params: { mode: ExportMode; format: ExportFormat; valid_only: boolean }): Promise<string>;
   getSettings(): Promise<RuntimeSettings>;
@@ -116,6 +117,10 @@ export function createApiClient(baseUrl: string): ApiClient {
         body: JSON.stringify(input),
       }),
     getJob: (id) => request(baseUrl, `/jobs/${pathSegment(id)}`),
+    cancelJob: (id) =>
+      request(baseUrl, `/jobs/${pathSegment(id)}/cancel`, {
+        method: "POST",
+      }),
     getResults: (id) => request(baseUrl, `/subscriptions/${pathSegment(id)}/results`),
     getEnhanced: (id, params) => {
       const query = new URLSearchParams({

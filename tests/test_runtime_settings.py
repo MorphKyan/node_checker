@@ -56,10 +56,10 @@ class RuntimeSettingsTests(unittest.TestCase):
             RuntimeSettings.apply({"PROBE_CACHE_TTL_SECONDS": 59}, persist=False)
 
         with self.assertRaises(ValueError):
-            RuntimeSettings.apply({"SUBSCRIPTION_MAX_BYTES": 1023}, persist=False)
+            RuntimeSettings.apply({"SUBSCRIPTION_MAX_M": 0}, persist=False)
 
         with self.assertRaises(ValueError):
-            RuntimeSettings.apply({"SPEEDTEST_MAX_BYTES": 1024 * 1024 - 1}, persist=False)
+            RuntimeSettings.apply({"SPEEDTEST_MAX_M": 0}, persist=False)
 
         with self.assertRaises(ValueError):
             RuntimeSettings.apply({"SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH": 15}, persist=False)

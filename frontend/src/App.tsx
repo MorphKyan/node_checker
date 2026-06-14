@@ -19,6 +19,7 @@ import {
   SlidersHorizontal,
   Trash2,
   XCircle,
+  AlertTriangle,
 } from "lucide-react";
 import {
   Bar,
@@ -37,6 +38,7 @@ import { duration, formatTime, groupCount, scoreBuckets, statusTone } from "./ap
 import { filterNodes } from "./nodeFilters";
 import { defaultPreferences, isExportFormat, isExportMode, loadPreferences, savePreferences } from "./preferences";
 import type {
+  ApiVerdict,
   ExportFormat,
   ExportMode,
   JobStatus,
@@ -101,7 +103,6 @@ export default function App() {
   const [exportFormat, setExportFormat] = useState<ExportFormat>(preferences.defaultExportFormat);
   const [exportValidOnly, setExportValidOnly] = useState(true);
   const [exportPreview, setExportPreview] = useState("");
-  const [customSpeedLimit, setCustomSpeedLimit] = useState(3);
   const [subscriptionForm, setSubscriptionForm] = useState({ name: "", url: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [operationError, setOperationError] = useState("");
@@ -297,9 +298,7 @@ export default function App() {
               subscriptions={subscriptionList}
               form={subscriptionForm}
               editingId={editingId}
-              customSpeedLimit={customSpeedLimit}
               onFormChange={setSubscriptionForm}
-              onCustomSpeedLimit={(value) => setCustomSpeedLimit(Math.max(0, Math.min(100, value)))}
               onCreate={() => createSubscription.mutate(subscriptionForm)}
               onStartEdit={(subscription) => {
                 setEditingId(subscription.id);
@@ -479,9 +478,7 @@ function SubscriptionsView(props: {
   subscriptions: SubscriptionSummary[];
   form: { name: string; url: string };
   editingId: string | null;
-  customSpeedLimit: number;
   onFormChange: (value: { name: string; url: string }) => void;
-  onCustomSpeedLimit: (value: number) => void;
   onCreate: () => void;
   onStartEdit: (subscription: SubscriptionSummary) => void;
   onCancelEdit: () => void;
@@ -491,7 +488,6 @@ function SubscriptionsView(props: {
   onOpenNodes: (id: string) => void;
   onOpenExport: (id: string) => void;
 }) {
-  const invalidCustomSpeedLimit = !Number.isInteger(props.customSpeedLimit) || props.customSpeedLimit < 0 || props.customSpeedLimit > 100;
   return (
     <div className="space-y-4">
       <Panel>
@@ -507,10 +503,6 @@ function SubscriptionsView(props: {
       <Panel>
         <div className="mb-3 flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-900">订阅列表</div>
-          <div className="flex items-center gap-2">
-            <Label>自定义每区域测速数量</Label>
-            <Input className="w-20" type="number" min={0} max={100} step={1} value={props.customSpeedLimit} onChange={(event) => props.onCustomSpeedLimit(Number(event.target.value))} />
-          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -537,9 +529,8 @@ function SubscriptionsView(props: {
                   <td className="px-3 py-3">
                     <div className="flex flex-wrap gap-2">
                       <Button variant="secondary" onClick={() => props.onRefresh(subscription.id)}>刷新</Button>
-                      <Button variant="secondary" disabled={invalidCustomSpeedLimit} onClick={() => props.onRefresh(subscription.id, props.customSpeedLimit, false)}>自定义</Button>
                       <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, 0, false)}>不测速</Button>
-                      <Button variant="secondary" disabled={invalidCustomSpeedLimit} onClick={() => props.onRefresh(subscription.id, props.customSpeedLimit, true)}>强制</Button>
+                      <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, undefined, true)}>强制</Button>
                       <Button variant="ghost" onClick={() => props.onStartEdit(subscription)}>编辑</Button>
                       <Button variant="ghost" onClick={() => props.onOpenNodes(subscription.id)}>节点</Button>
                       <Button variant="ghost" onClick={() => props.onOpenExport(subscription.id)}>导出</Button>
@@ -753,8 +744,18 @@ function SettingsView({ settings, metadata, preferences, onSaveSettings, onPrefe
             <SettingNumber label="测速并发" metadata={metadata?.SPEEDTEST_CONCURRENCY} value={current.SPEEDTEST_CONCURRENCY} onChange={(value) => setDraft({ ...draft, SPEEDTEST_CONCURRENCY: value })} />
             <SettingNumber label="每区域默认测速数量" metadata={metadata?.API_DEFAULT_SPEEDTEST_LIMIT} value={current.API_DEFAULT_SPEEDTEST_LIMIT} onChange={(value) => setDraft({ ...draft, API_DEFAULT_SPEEDTEST_LIMIT: value })} />
             <SettingNumber label="缓存 TTL 秒" metadata={metadata?.PROBE_CACHE_TTL_SECONDS} value={current.PROBE_CACHE_TTL_SECONDS} onChange={(value) => setDraft({ ...draft, PROBE_CACHE_TTL_SECONDS: value })} />
-            <SettingNumber label="订阅最大字节" metadata={metadata?.SUBSCRIPTION_MAX_BYTES} value={current.SUBSCRIPTION_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_MAX_BYTES: value })} />
-            <SettingNumber label="测速最大字节" metadata={metadata?.SPEEDTEST_MAX_BYTES} value={current.SPEEDTEST_MAX_BYTES} onChange={(value) => setDraft({ ...draft, SPEEDTEST_MAX_BYTES: value })} />
+            <SettingNumber
+              label="订阅最大 (M)"
+              metadata={metadata?.SUBSCRIPTION_MAX_M}
+              value={current.SUBSCRIPTION_MAX_M}
+              onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_MAX_M: value })}
+            />
+            <SettingNumber
+              label="测速最大 (M)"
+              metadata={metadata?.SPEEDTEST_MAX_M}
+              value={current.SPEEDTEST_MAX_M}
+              onChange={(value) => setDraft({ ...draft, SPEEDTEST_MAX_M: value })}
+            />
             <SettingNumber label="compact 长度" metadata={metadata?.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH} value={current.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: value })} />
             <SettingNumber label="detailed 长度" metadata={metadata?.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH} value={current.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH} onChange={(value) => setDraft({ ...draft, SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: value })} />
             <div><Label>缓存开关</Label><Select className="mt-1 w-full" value={String(current.CACHE_ENABLED)} onChange={(event) => setDraft({ ...draft, CACHE_ENABLED: event.target.value === "true" })}><option value="true">开启</option><option value="false">关闭</option></Select></div>
@@ -779,21 +780,207 @@ function SettingsView({ settings, metadata, preferences, onSaveSettings, onPrefe
   );
 }
 
-function SettingNumber({ label, value, metadata, onChange }: { label: string; value: number; metadata?: { min?: number; max?: number }; onChange: (value: number) => void }) {
+function SettingNumber({ label, value, metadata, step, onChange }: { label: string; value: number; metadata?: { min?: number; max?: number }; step?: string; onChange: (value: number) => void }) {
   const inputId = `setting-${label}`;
-  return <div><Label htmlFor={inputId}>{label}</Label><Input id={inputId} className="mt-1" type="number" min={metadata?.min} max={metadata?.max} value={value ?? 0} onChange={(event) => onChange(Number(event.target.value))} /></div>;
+  return <div><Label htmlFor={inputId}>{label}</Label><Input id={inputId} className="mt-1" type="number" min={metadata?.min} max={metadata?.max} step={step} value={value ?? 0} onChange={(event) => onChange(Number(event.target.value))} /></div>;
+}
+
+interface ConflictInfo {
+  type: "geo" | "network" | "risk";
+  description: string;
+}
+
+function detectConflicts(evidence: ApiVerdict[], actualGeo: string): ConflictInfo[] {
+  const conflicts: ConflictInfo[] = [];
+  if (!evidence || evidence.length === 0) return conflicts;
+
+  // 1. Network type conflict
+  let hasResidential = false;
+  let hasDatacenter = false;
+  const resSources: string[] = [];
+  const dcSources: string[] = [];
+
+  for (const verdict of evidence) {
+    for (const lbl of verdict.network_labels) {
+      if (
+        lbl.label === "residential" ||
+        lbl.label === "likely_residential" ||
+        lbl.label === "mobile" ||
+        lbl.label === "business"
+      ) {
+        hasResidential = true;
+        resSources.push(`${verdict.source} (${lbl.display || lbl.label})`);
+      } else if (lbl.label === "datacenter" || lbl.label === "hosting") {
+        hasDatacenter = true;
+        dcSources.push(`${verdict.source} (${lbl.display || lbl.label})`);
+      }
+    }
+  }
+  if (hasResidential && hasDatacenter) {
+    conflicts.push({
+      type: "network",
+      description: `网络属性冲突：部分数据源判定为家宽/商宽/移动网络 [${resSources.join(
+        ", "
+      )}]，而其他判定为机房/托管 [${dcSources.join(", ")}]。`,
+    });
+  }
+
+  // 2. Risk evaluation conflict
+  let hasHighRisk = false;
+  let hasClean = false;
+  const riskSources: string[] = [];
+  const cleanSources: string[] = [];
+
+  for (const verdict of evidence) {
+    if (verdict.risk_score !== null && verdict.risk_score > 50) {
+      hasHighRisk = true;
+      riskSources.push(`${verdict.source} (风险评分: ${verdict.risk_score}%)`);
+    }
+    for (const lbl of verdict.risk_labels) {
+      if (
+        lbl.label === "vpn" ||
+        lbl.label === "proxy" ||
+        lbl.label === "tor" ||
+        lbl.label === "abuser"
+      ) {
+        hasHighRisk = true;
+        if (!riskSources.some((s) => s.startsWith(verdict.source))) {
+          riskSources.push(`${verdict.source} (${lbl.display || lbl.label})`);
+        }
+      } else if (lbl.label === "clean" && lbl.confidence > 0.6) {
+        hasClean = true;
+        cleanSources.push(`${verdict.source} (置信度: ${Math.round(lbl.confidence * 100)}%)`);
+      }
+    }
+  }
+  if (hasHighRisk && hasClean) {
+    conflicts.push({
+      type: "risk",
+      description: `信誉风险冲突：部分数据源报告高风险评分/标签 [${riskSources.join(
+        ", "
+      )}]，而其他数据源判定为干净信誉 [${cleanSources.join(", ")}]。`,
+    });
+  }
+
+  return conflicts;
 }
 
 function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }) {
+  const conflicts = useMemo(() => detectConflicts(node.probe.evidence, node.probe.actual_geo), [node]);
+
   return (
     <div className="fixed inset-0 z-30 bg-slate-950/20">
-      <aside className="absolute inset-y-0 right-0 w-[560px] overflow-y-auto border-l border-border bg-white p-5 shadow-2xl">
-        <div className="flex items-center justify-between"><div className="text-lg font-semibold">节点详情</div><Button variant="secondary" onClick={onClose}>关闭</Button></div>
+      <aside className="absolute inset-y-0 right-0 w-[580px] overflow-y-auto border-l border-border bg-white p-5 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <div className="text-lg font-semibold">节点详情</div>
+          <Button variant="secondary" onClick={onClose}>关闭</Button>
+        </div>
         <div className="mt-4 space-y-4 text-sm">
-          <Panel><div className="font-medium">{node.enhanced_name_detailed}</div><div className="mt-2 text-slate-500">{node.original_name}</div></Panel>
-          <Panel><pre className="whitespace-pre-wrap break-all text-xs">{node.raw_uri}</pre></Panel>
-          <Panel><div className="grid grid-cols-2 gap-2"><Detail label="出口 IP" value={node.probe.actual_ip} /><Detail label="ASN" value={node.probe.asn_org} /><Detail label="拒绝原因" value={node.reject_reason || "-"} /><Detail label="骨干网" value={node.probe.backbone_info || "-"} /><Detail label="绕路" value={node.probe.is_detour ? "Yes" : "No"} /><Detail label="置信度" value={node.probe.confidence} /></div></Panel>
-          <Panel><div className="mb-2 font-medium">Evidence</div><div className="space-y-2">{node.probe.evidence.length ? node.probe.evidence.map((item) => <div key={item} className="rounded-md bg-slate-50 p-2 text-xs text-slate-700">{item}</div>) : <div className="text-slate-500">No evidence</div>}</div></Panel>
+          <Panel>
+            <div className="font-semibold text-slate-800">{node.enhanced_name_detailed}</div>
+            <div className="mt-2 text-slate-500 break-all text-xs">{node.original_name}</div>
+          </Panel>
+
+          <Panel>
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">节点链接</span>
+            </div>
+            <pre className="whitespace-pre-wrap break-all text-xs bg-slate-50 p-2 rounded-md border border-slate-100 font-mono text-slate-600">{node.raw_uri}</pre>
+          </Panel>
+
+          {conflicts.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+                <div>
+                  <div className="font-semibold text-amber-950">画像数据源冲突警告</div>
+                  <div className="mt-1.5 space-y-1.5 text-xs text-amber-800">
+                    {conflicts.map((c, i) => (
+                      <div key={i} className="flex gap-1">
+                        <span className="shrink-0">•</span>
+                        <span>{c.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <Panel>
+            <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">网络及延迟属性</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              <Detail label="实际出口 IP" value={node.probe.actual_ip} />
+              <Detail label="IPv6 出口" value={node.probe.ipv6_support ? `支持 (${node.probe.actual_ipv6})` : "不支持"} />
+              <Detail label="归属国家/地区 (Geo)" value={node.probe.actual_geo} />
+              <Detail label="ASN" value={node.probe.asn_org} />
+              <Detail label="拒绝原因" value={node.reject_reason || "-"} />
+              <Detail label="骨干网" value={node.probe.backbone_info || "-"} />
+              <Detail label="绕路状态" value={node.probe.is_detour ? "Yes" : "No"} />
+              <Detail label="判定置信度" value={node.probe.confidence} />
+              <Detail label="TCP 延迟" value={`${node.probe.tcp_ping_ms} ms`} />
+              <Detail label="HTTP TTFB" value={`${node.probe.ttfb_ms} ms`} />
+            </div>
+          </Panel>
+
+          <Panel>
+            <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">数据源画像详情 (Evidence)</div>
+            <div className="space-y-3">
+              {node.probe.evidence && node.probe.evidence.length ? (
+                node.probe.evidence.map((verdict) => (
+                  <div key={verdict.source} className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 text-xs">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                      <span className="font-bold text-slate-700">{verdict.source}</span>
+                      {verdict.risk_score !== null && (
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          verdict.risk_score > 70 ? 'bg-red-100 text-red-700' :
+                          verdict.risk_score > 30 ? 'bg-amber-100 text-amber-700' :
+                          'bg-emerald-100 text-emerald-700'
+                        }`}>
+                          风险评分: {verdict.risk_score}%
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {verdict.network_labels && verdict.network_labels.length > 0 && (
+                        <div className="flex items-start gap-1 flex-wrap">
+                          <span className="text-slate-400 font-medium shrink-0">网络属性:</span>
+                          {verdict.network_labels.map((lbl) => (
+                            <span key={lbl.label} className="inline-flex items-center bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                              {lbl.display} ({(lbl.confidence * 100).toFixed(0)}%)
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {verdict.risk_labels && verdict.risk_labels.length > 0 && (
+                        <div className="flex items-start gap-1 flex-wrap">
+                          <span className="text-slate-400 font-medium shrink-0">信誉评级:</span>
+                          {verdict.risk_labels.map((lbl) => (
+                            <span key={lbl.label} className={`inline-flex items-center border px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              lbl.label === 'clean' 
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                : 'bg-red-50 text-red-700 border-red-100'
+                            }`}>
+                              {lbl.display} ({(lbl.confidence * 100).toFixed(0)}%)
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex items-start gap-1">
+                        <span className="text-slate-400 font-medium shrink-0">原始摘要:</span>
+                        <span className="text-slate-600 break-all font-mono">{verdict.raw_summary || "No signal"}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-slate-500 py-2 text-center">No source evidence available</div>
+              )}
+            </div>
+          </Panel>
         </div>
       </aside>
     </div>

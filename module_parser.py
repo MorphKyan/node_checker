@@ -24,7 +24,7 @@ class VlessParser:
     @staticmethod
     async def fetch_subscription(url: str) -> str:
         timeout = aiohttp.ClientTimeout(total=settings.API_TIMEOUT)
-        max_bytes = max(1, int(settings.SUBSCRIPTION_MAX_BYTES))
+        max_bytes = max(1, int(settings.SUBSCRIPTION_MAX_M)) * 1024 * 1024
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as resp:
                 resp.raise_for_status()

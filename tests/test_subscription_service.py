@@ -39,17 +39,17 @@ def make_analyzed_node(node: VlessNode, score: float = 90.0, actual_geo: str | N
 
 class SubscriptionRefreshServiceTests(unittest.TestCase):
     def test_fetch_subscription_text_rejects_large_local_file(self):
-        original_max_bytes = settings.SUBSCRIPTION_MAX_BYTES
-        settings.SUBSCRIPTION_MAX_BYTES = 8
+        original_max_m = settings.SUBSCRIPTION_MAX_M
+        settings.SUBSCRIPTION_MAX_M = 1
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 path = Path(tmpdir, "sub.txt")
-                path.write_text("123456789", encoding="utf-8")
+                path.write_text("A" * (1024 * 1024 + 1), encoding="utf-8")
 
-                with self.assertRaisesRegex(ValueError, "exceeds 8 bytes"):
+                with self.assertRaisesRegex(ValueError, "exceeds 1048576 bytes"):
                     asyncio.run(SubscriptionRefreshService.fetch_subscription_text(str(path)))
         finally:
-            settings.SUBSCRIPTION_MAX_BYTES = original_max_bytes
+            settings.SUBSCRIPTION_MAX_M = original_max_m
 
     def test_run_nodes_limits_speedtest_concurrency(self):
         async def run_case():

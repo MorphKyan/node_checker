@@ -17,7 +17,7 @@ class BandwidthTester:
         transport = AsyncProxyTransport.from_url(socks5_url)
         start_time = time.perf_counter()
         downloaded_bytes = 0
-        max_bytes = max(1, int(settings.SPEEDTEST_MAX_BYTES))
+        max_bytes = max(1, int(settings.SPEEDTEST_MAX_M)) * 1024 * 1024
         
         try:
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}

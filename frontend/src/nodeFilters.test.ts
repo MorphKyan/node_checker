@@ -29,6 +29,8 @@ function makeNode(overrides: Partial<NodeResult>): NodeResult {
       is_backbone: true,
       backbone_info: "CN2",
       evidence: [],
+      ipv6_support: false,
+      actual_ipv6: "",
     },
     ...overrides,
   };

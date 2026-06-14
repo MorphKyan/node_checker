@@ -18,7 +18,7 @@ describe("api client", () => {
 
   it("builds enhanced subscription URLs", () => {
     expect(enhancedUrl("", "sub_1", { mode: "detailed", format: "plain", valid_only: false })).toBe(
-      "/subscriptions/sub_1/enhanced?mode=detailed&format=plain&valid_only=false",
+      "/subscriptions/enhanced?subscription_id=sub_1&mode=detailed&format=plain&valid_only=false",
     );
   });
 
@@ -74,7 +74,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenCalledWith("/subscriptions/sub%2Fwith%20space/results", expect.any(Object));
     expect(enhancedUrl("", "sub/with space", { mode: "compact", format: "base64", valid_only: true })).toBe(
-      "/subscriptions/sub%2Fwith%20space/enhanced?mode=compact&format=base64&valid_only=true",
+      "/subscriptions/enhanced?subscription_id=sub%2Fwith+space&mode=compact&format=base64&valid_only=true",
     );
     vi.unstubAllGlobals();
   });

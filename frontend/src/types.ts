@@ -27,12 +27,28 @@ export interface JobStatus {
   finished_at: number | null;
 }
 
+export interface LabelEvidence {
+  label: string;
+  confidence: number;
+  display: string;
+}
+
+export interface ApiVerdict {
+  source: string;
+  network_labels: LabelEvidence[];
+  risk_labels: LabelEvidence[];
+  risk_score: number | null;
+  raw_summary: string;
+}
+
 export interface NodeProbe {
   tcp_ping_ms: number;
   ttfb_ms: number;
   actual_ip: string;
   actual_geo: string;
   asn_org: string;
+  ipv6_support: boolean;
+  actual_ipv6: string;
   risk_score: number;
   network_labels: string[];
   type_labels: string[];
@@ -40,7 +56,7 @@ export interface NodeProbe {
   is_detour: boolean;
   is_backbone: boolean;
   backbone_info: string;
-  evidence: string[];
+  evidence: ApiVerdict[];
 }
 
 export interface NodeResult {
@@ -76,8 +92,8 @@ export interface RuntimeSettings {
   CACHE_ENABLED: boolean;
   PROBE_CACHE_TTL_SECONDS: number;
   CACHE_FAILURE_RESULTS: boolean;
-  SUBSCRIPTION_MAX_BYTES: number;
-  SPEEDTEST_MAX_BYTES: number;
+  SUBSCRIPTION_MAX_M: number;
+  SPEEDTEST_MAX_M: number;
   SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: number;
   SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: number;
   TTFB_TARGET_URL: string;

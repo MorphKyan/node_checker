@@ -13,6 +13,7 @@ from module_cache import ProbeCache
 from module_runtime_settings import RuntimeSettings
 from module_subscription_exporter import SubscriptionExporter
 from module_subscription_service import SubscriptionRefreshService
+from module_singbox_exporter import generate_singbox_config
 
 
 
@@ -68,6 +69,16 @@ class RuntimeSettingsRequest(BaseModel):
     SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: Optional[int] = Field(default=None, ge=32, le=240)
     TTFB_TARGET_URL: Optional[str] = Field(default=None, min_length=1)
     SPEEDTEST_URL: Optional[str] = Field(default=None, min_length=1)
+
+
+class SingboxTemplateCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1)
+
+
+class SingboxTemplateUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1)
+    content: Optional[str] = Field(default=None, min_length=1)
 
 
 def ensure_subscription(subscription_id: str) -> dict:
@@ -285,6 +296,118 @@ async def update_settings(payload: RuntimeSettingsRequest) -> dict:
     if not data:
         raise HTTPException(status_code=422, detail="No settings to update")
     return RuntimeSettings.apply(data)
+
+
+@app.get("/singbox/templates")
+async def list_singbox_templates() -> list[dict]:
+    return ApiStore.list_singbox_templates()
+
+
+@app.post("/singbox/templates")
+async def create_singbox_template(payload: SingboxTemplateCreateRequest) -> dict:
+    return ApiStore.create_singbox_template(payload.name, payload.content)
+
+
+@app.get("/singbox/templates/{template_id}")
+async def get_singbox_template(template_id: str) -> dict:
+    template = ApiStore.get_singbox_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return template
+
+
+@app.patch("/singbox/templates/{template_id}")
+async def update_singbox_template(template_id: str, payload: SingboxTemplateUpdateRequest) -> dict:
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=422, detail="No fields to update")
+    updated = ApiStore.update_singbox_template(template_id, **data)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return updated
+
+
+@app.delete("/singbox/templates/{template_id}")
+async def delete_singbox_template(template_id: str) -> dict:
+    if not ApiStore.delete_singbox_template(template_id):
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"deleted": True, "template_id": template_id}
+
+
+@app.get("/subscriptions/singbox")
+async def get_singbox_subscription(
+    subscription_ids: list[str] = Query(..., alias="subscription_id"),
+    template_id: Optional[str] = Query(default=None),
+    limit: Optional[int] = Query(default=None, ge=1),
+    min_score: Optional[float] = Query(default=None, ge=0.0, le=100.0),
+    mode: Literal["compact", "detailed"] = "compact",
+    valid_only: bool = Query(default=True),
+):
+    from module_node_identity import make_node_fingerprint
+
+    # 1. Fetch template content
+    if template_id:
+        template = ApiStore.get_singbox_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+    else:
+        templates = ApiStore.list_singbox_templates()
+        if not templates:
+            raise HTTPException(status_code=400, detail="No templates available")
+        template = templates[0]
+
+    # 2. Verify all requested subscriptions exist
+    for sub_id in subscription_ids:
+        ensure_subscription(sub_id)
+
+    # 3. Retrieve latest results and aggregate nodes
+    aggregated_nodes_map = {}
+    has_results = False
+    for sub_id in subscription_ids:
+        result = ApiStore.get_latest_result(sub_id)
+        if result:
+            has_results = True
+            for node in result["nodes"]:
+                # Deduplication using make_node_fingerprint
+                fp = make_node_fingerprint(node.analyzed_node.node)
+                existing = aggregated_nodes_map.get(fp)
+                if not existing or node.analyzed_node.total_score > existing.analyzed_node.total_score:
+                    aggregated_nodes_map[fp] = node
+
+    if not has_results:
+        raise HTTPException(
+            status_code=409,
+            detail="No completed result is available for any of the subscriptions",
+        )
+
+    aggregated_nodes = list(aggregated_nodes_map.values())
+
+    # 4. Filter nodes by validity and minimum score
+    filtered_nodes = []
+    for node in aggregated_nodes:
+        if valid_only and not node.analyzed_node.is_valid:
+            continue
+        if min_score is not None and node.analyzed_node.total_score < min_score:
+            continue
+        filtered_nodes.append(node)
+
+    # 5. Apply limit
+    sorted_nodes = SubscriptionExporter.sort_nodes(filtered_nodes, valid_only=False)
+    if limit is not None:
+        sorted_nodes = sorted_nodes[:limit]
+
+    # 6. Generate configuration
+    try:
+        config = generate_singbox_config(
+            template["content"],
+            sorted_nodes,
+            mode=mode,
+            max_name_length=96 if mode == "detailed" else 64
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Configuration generation error: {e}")
+
+    return config
 
 
 def frontend_dist_dir() -> Path:

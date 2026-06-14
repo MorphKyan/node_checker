@@ -116,3 +116,11 @@ export interface LocalPreferences {
   defaultExportFormat: ExportFormat;
   pageSize: number;
 }
+
+export interface SingboxTemplate {
+  id: string;
+  name: string;
+  content: string;
+  created_at: number;
+  updated_at: number;
+}

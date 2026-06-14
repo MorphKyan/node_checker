@@ -106,14 +106,44 @@ class SubscriptionExporter:
         return analyzed.node.expected_geo or "Unknown"
 
     @staticmethod
+    def clean_original_remark(remark: str, geo_code: str) -> str:
+        if not remark:
+            return ""
+        import re
+        # 1. Remove regional indicator symbols (flags)
+        cleaned = re.sub(r'[\U0001F1E6-\U0001F1FF]', '', remark)
+
+        # 2. Get terms matching the geo code
+        from module_parser import GEO_MAP
+        geo_upper = geo_code.upper()
+        terms = [geo_upper]
+        for k, v in GEO_MAP.items():
+            if v.upper() == geo_upper:
+                terms.append(k)
+
+        # Sort terms by length descending to replace longer words first
+        terms.sort(key=len, reverse=True)
+
+        # Remove terms case-insensitively using word boundaries
+        for term in terms:
+            pattern = re.compile(rf'\b{re.escape(term)}\b', re.IGNORECASE)
+            cleaned = pattern.sub('', cleaned)
+
+        # 3. Clean up leading/trailing spaces & separators
+        cleaned = re.sub(r'^[\s\-_|/\\+:=]+', '', cleaned)
+        cleaned = re.sub(r'[\s\-_|/\\+:=]+$', '', cleaned)
+        return cleaned
+
+    @staticmethod
     def build_remark(tested_node: TestedNode, mode: str, max_length: int) -> str:
         analyzed = tested_node.analyzed_node
         node = analyzed.node
         probe = analyzed.probe
         profile = probe.profile
 
+        geo_code = SubscriptionExporter.choose_geo(tested_node)
         parts = [
-            SubscriptionExporter.format_location(SubscriptionExporter.choose_geo(tested_node)),
+            SubscriptionExporter.format_location(geo_code),
             SubscriptionExporter.format_network_labels(profile),
             SubscriptionExporter.format_type_labels(profile),
             SubscriptionExporter.format_score(analyzed.total_score),
@@ -129,8 +159,10 @@ class SubscriptionExporter:
             parts.append(SubscriptionExporter.format_speed(tested_node.download_speed_mbps))
             if probe.asn_org:
                 parts.append(str(probe.asn_org))
-            if node.remark:
-                parts.append(str(node.remark))
+            
+            cleaned_remark = SubscriptionExporter.clean_original_remark(node.remark, geo_code)
+            if cleaned_remark:
+                parts.append(cleaned_remark)
         else:
             raise ValueError(f"Unsupported subscription remark mode: {mode}")
 

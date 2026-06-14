@@ -43,6 +43,7 @@ def build_plain_subscription(
 
 
 def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
+    from module_profile import DISPLAY_LABELS
     sorted_nodes = SubscriptionExporter.sort_nodes(nodes, valid_only=False)
     compact_names = SubscriptionExporter.deduplicate_names(
         [
@@ -92,6 +93,8 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                     "actual_ip": probe.actual_ip,
                     "actual_geo": probe.actual_geo,
                     "asn_org": probe.asn_org,
+                    "ipv6_support": probe.ipv6_support,
+                    "actual_ipv6": probe.actual_ipv6,
                     "risk_score": profile.risk_score,
                     "network_labels": [
                         SubscriptionExporter.format_labels([label], "")
@@ -106,7 +109,27 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                     "is_backbone": probe.is_backbone,
                     "backbone_info": probe.backbone_info,
                     "evidence": [
-                        f"{verdict.source}: {verdict.raw_summary or 'No signal'}"
+                        {
+                            "source": verdict.source,
+                            "network_labels": [
+                                {
+                                    "label": label.label,
+                                    "confidence": label.confidence,
+                                    "display": DISPLAY_LABELS.get(label.label, label.label),
+                                }
+                                for label in verdict.network_labels
+                            ],
+                            "risk_labels": [
+                                {
+                                    "label": label.label,
+                                    "confidence": label.confidence,
+                                    "display": DISPLAY_LABELS.get(label.label, label.label),
+                                }
+                                for label in verdict.risk_labels
+                            ],
+                            "risk_score": verdict.risk_score,
+                            "raw_summary": verdict.raw_summary,
+                        }
                         for verdict in profile.evidence
                     ],
                 },

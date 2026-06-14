@@ -65,8 +65,8 @@ class ApiServerTests(unittest.TestCase):
         self.original_filter_concurrency = settings.FILTER_CONCURRENCY
         self.original_speedtest_concurrency = settings.SPEEDTEST_CONCURRENCY
         self.original_speedtest_limit = settings.API_DEFAULT_SPEEDTEST_LIMIT
-        self.original_subscription_max_bytes = settings.SUBSCRIPTION_MAX_BYTES
-        self.original_speedtest_max_bytes = settings.SPEEDTEST_MAX_BYTES
+        self.original_subscription_max_m = settings.SUBSCRIPTION_MAX_M
+        self.original_speedtest_max_m = settings.SPEEDTEST_MAX_M
         settings.API_DB_PATH = str(Path(self.tmpdir.name, "api.sqlite3"))
         settings.CACHE_DB_PATH = str(Path(self.tmpdir.name, "probe_cache.sqlite3"))
         settings.RUNTIME_SETTINGS_PATH = str(Path(self.tmpdir.name, "runtime_settings.json"))
@@ -89,8 +89,8 @@ class ApiServerTests(unittest.TestCase):
         settings.FILTER_CONCURRENCY = self.original_filter_concurrency
         settings.SPEEDTEST_CONCURRENCY = self.original_speedtest_concurrency
         settings.API_DEFAULT_SPEEDTEST_LIMIT = self.original_speedtest_limit
-        settings.SUBSCRIPTION_MAX_BYTES = self.original_subscription_max_bytes
-        settings.SPEEDTEST_MAX_BYTES = self.original_speedtest_max_bytes
+        settings.SUBSCRIPTION_MAX_M = self.original_subscription_max_m
+        settings.SPEEDTEST_MAX_M = self.original_speedtest_max_m
         ApiStore._initialized_paths.clear()
         self.tmpdir.cleanup()
 
@@ -301,7 +301,7 @@ class ApiServerTests(unittest.TestCase):
         subscription = self.create_subscription_without_refresh()
         self.save_result(subscription["id"])
 
-        response = self.client.get(f"/subscriptions/{subscription['id']}/enhanced")
+        response = self.client.get(f"/subscriptions/enhanced?subscription_id={subscription['id']}")
 
         self.assertEqual(response.status_code, 200)
         decoded = base64.b64decode(response.text).decode("utf-8")
@@ -313,7 +313,7 @@ class ApiServerTests(unittest.TestCase):
         self.save_result(subscription["id"])
 
         response = self.client.get(
-            f"/subscriptions/{subscription['id']}/enhanced?format=plain&mode=detailed"
+            f"/subscriptions/enhanced?subscription_id={subscription['id']}&format=plain&mode=detailed"
         )
 
         self.assertEqual(response.status_code, 200)
@@ -343,10 +343,83 @@ class ApiServerTests(unittest.TestCase):
         self.assertIn("%E6%9C%BA%E6%88%BF", node["compact_uri"])
         self.assertIn("Example%20ASN", node["detailed_uri"])
 
+
+    def test_enhanced_aggregation_and_deduplication(self):
+        sub1 = self.create_subscription_without_refresh()
+        sub2 = self.create_subscription_without_refresh()
+
+        node_dup_low = make_tested_node(valid=True)
+        node_dup_low.analyzed_node.node.raw_uri = "vless://uuid1@example.com:443?security=tls#JP1"
+        node_dup_low.analyzed_node.node.uuid = "uuid1"
+        node_dup_low.analyzed_node.node.remark = "JP1"
+        node_dup_low.analyzed_node.total_score = 60.0
+
+        node_dup_high = make_tested_node(valid=True)
+        node_dup_high.analyzed_node.node.raw_uri = "vless://uuid1@example.com:443?security=tls#JP2"
+        node_dup_high.analyzed_node.node.uuid = "uuid1"
+        node_dup_high.analyzed_node.node.remark = "JP2"
+        node_dup_high.analyzed_node.total_score = 90.0
+
+        node_unique = make_tested_node(valid=True)
+        node_unique.analyzed_node.node.raw_uri = "vless://uuid2@example.com:443?security=tls#JP3"
+        node_unique.analyzed_node.node.uuid = "uuid2"
+        node_unique.analyzed_node.node.remark = "JP3"
+        node_unique.analyzed_node.total_score = 80.0
+
+        self.save_result(sub1["id"], [node_dup_low])
+        self.save_result(sub2["id"], [node_dup_high, node_unique])
+
+        response = self.client.get(
+            f"/subscriptions/enhanced?subscription_id={sub1['id']}&subscription_id={sub2['id']}&format=plain&mode=detailed"
+        )
+        self.assertEqual(response.status_code, 200)
+        lines = response.text.strip().splitlines()
+
+        self.assertEqual(len(lines), 2)
+        self.assertIn("JP2", lines[0])
+        self.assertIn("JP3", lines[1])
+
+    def test_enhanced_aggregation_filters_and_limit(self):
+        sub = self.create_subscription_without_refresh()
+        node_low = make_tested_node(valid=True)
+        node_low.analyzed_node.total_score = 30.0
+        node_low.analyzed_node.node.raw_uri = "vless://uuid_low@example.com:443?security=tls#Low"
+        node_low.analyzed_node.node.uuid = "uuid_low"
+        node_low.analyzed_node.node.remark = "Low"
+
+        node_high1 = make_tested_node(valid=True)
+        node_high1.analyzed_node.total_score = 95.0
+        node_high1.analyzed_node.node.raw_uri = "vless://uuid_h1@example.com:443?security=tls#H1"
+        node_high1.analyzed_node.node.uuid = "uuid_h1"
+        node_high1.analyzed_node.node.remark = "H1"
+
+        node_high2 = make_tested_node(valid=True)
+        node_high2.analyzed_node.total_score = 85.0
+        node_high2.analyzed_node.node.raw_uri = "vless://uuid_h2@example.com:443?security=tls#H2"
+        node_high2.analyzed_node.node.uuid = "uuid_h2"
+        node_high2.analyzed_node.node.remark = "H2"
+
+        self.save_result(sub["id"], [node_low, node_high1, node_high2])
+
+        resp_score = self.client.get(
+            f"/subscriptions/enhanced?subscription_id={sub['id']}&format=plain&min_score=50"
+        )
+        self.assertEqual(resp_score.status_code, 200)
+        lines_score = resp_score.text.strip().splitlines()
+        self.assertEqual(len(lines_score), 2)
+
+        resp_limit = self.client.get(
+            f"/subscriptions/enhanced?subscription_id={sub['id']}&format=plain&limit=1&mode=detailed"
+        )
+        self.assertEqual(resp_limit.status_code, 200)
+        lines_limit = resp_limit.text.strip().splitlines()
+        self.assertEqual(len(lines_limit), 1)
+        self.assertIn("H1", lines_limit[0])
+
     def test_missing_result_returns_409(self):
         subscription = self.create_subscription_without_refresh()
 
-        enhanced = self.client.get(f"/subscriptions/{subscription['id']}/enhanced")
+        enhanced = self.client.get(f"/subscriptions/enhanced?subscription_id={subscription['id']}")
         results = self.client.get(f"/subscriptions/{subscription['id']}/results")
 
         self.assertEqual(enhanced.status_code, 409)
@@ -367,8 +440,8 @@ class ApiServerTests(unittest.TestCase):
                 "FILTER_CONCURRENCY": 7,
                 "SPEEDTEST_CONCURRENCY": 3,
                 "API_DEFAULT_SPEEDTEST_LIMIT": 0,
-                "SUBSCRIPTION_MAX_BYTES": 4096,
-                "SPEEDTEST_MAX_BYTES": 2 * 1024 * 1024,
+                "SUBSCRIPTION_MAX_M": 4,
+                "SPEEDTEST_MAX_M": 2,
             },
         )
         self.assertEqual(patch_response.status_code, 200)
@@ -376,12 +449,12 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload["FILTER_CONCURRENCY"], 7)
         self.assertEqual(payload["SPEEDTEST_CONCURRENCY"], 3)
         self.assertEqual(payload["API_DEFAULT_SPEEDTEST_LIMIT"], 0)
-        self.assertEqual(payload["SUBSCRIPTION_MAX_BYTES"], 4096)
-        self.assertEqual(payload["SPEEDTEST_MAX_BYTES"], 2 * 1024 * 1024)
+        self.assertEqual(payload["SUBSCRIPTION_MAX_M"], 4)
+        self.assertEqual(payload["SPEEDTEST_MAX_M"], 2)
         self.assertEqual(settings.FILTER_CONCURRENCY, 7)
         self.assertEqual(settings.SPEEDTEST_CONCURRENCY, 3)
-        self.assertEqual(settings.SUBSCRIPTION_MAX_BYTES, 4096)
-        self.assertEqual(settings.SPEEDTEST_MAX_BYTES, 2 * 1024 * 1024)
+        self.assertEqual(settings.SUBSCRIPTION_MAX_M, 4)
+        self.assertEqual(settings.SPEEDTEST_MAX_M, 2)
 
         runtime_file = Path(settings.RUNTIME_SETTINGS_PATH)
         self.assertTrue(runtime_file.exists())

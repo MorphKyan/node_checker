@@ -124,11 +124,12 @@ export function createApiClient(baseUrl: string): ApiClient {
     getResults: (id) => request(baseUrl, `/subscriptions/${pathSegment(id)}/results`),
     getEnhanced: (id, params) => {
       const query = new URLSearchParams({
+        subscription_id: id,
         mode: params.mode,
         format: params.format,
         valid_only: String(params.valid_only),
       });
-      return request(baseUrl, `/subscriptions/${pathSegment(id)}/enhanced?${query.toString()}`);
+      return request(baseUrl, `/subscriptions/enhanced?${query.toString()}`);
     },
     getSettings: () => request(baseUrl, "/settings"),
     getSettingsMetadata: () => request(baseUrl, "/settings/metadata"),
@@ -142,9 +143,10 @@ export function createApiClient(baseUrl: string): ApiClient {
 
 export function enhancedUrl(baseUrl: string, id: string, params: { mode: ExportMode; format: ExportFormat; valid_only: boolean }): string {
   const query = new URLSearchParams({
+    subscription_id: id,
     mode: params.mode,
     format: params.format,
     valid_only: String(params.valid_only),
   });
-  return joinUrl(baseUrl, `/subscriptions/${pathSegment(id)}/enhanced?${query.toString()}`);
+  return joinUrl(baseUrl, `/subscriptions/enhanced?${query.toString()}`);
 }

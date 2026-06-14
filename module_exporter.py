@@ -127,6 +127,8 @@ class ResultExporter:
 - **Actual IP**: `{probe.actual_ip}`
 - **Actual Geo**: `{probe.actual_geo}`
 - **ASN Org**: `{probe.asn_org}`
+- **IPv6 Outbound Support**: `{"Yes" if probe.ipv6_support else "No"}`
+- **Actual IPv6 IP**: `{probe.actual_ipv6 or "N/A"}`
 
 ### IP Intelligence
 - **IPWhoIs**: `{probe.ipwhois_info}`

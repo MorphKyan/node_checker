@@ -1,7 +1,7 @@
 import unittest
 
 from models import AnalyzedNode, ApiVerdict, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode
-from module_result_codec import restore_probe_data, tested_nodes_from_json, tested_nodes_to_json
+from module_result_codec import restore_probe_data, tested_nodes_from_json as _tested_nodes_from_json, tested_nodes_to_json as _tested_nodes_to_json
 
 
 def make_node() -> TestedNode:
@@ -33,7 +33,7 @@ def make_node() -> TestedNode:
 
 class ResultCodecTests(unittest.TestCase):
     def test_round_trips_tested_nodes_with_profile_evidence(self):
-        restored = tested_nodes_from_json(tested_nodes_to_json([make_node()]))
+        restored = _tested_nodes_from_json(_tested_nodes_to_json([make_node()]))
 
         profile = restored[0].analyzed_node.probe.profile
         self.assertIsInstance(profile.network_labels[0], LabelEvidence)
@@ -54,6 +54,32 @@ class ResultCodecTests(unittest.TestCase):
         )
 
         self.assertEqual(probe.profile.display_labels, ["未知"])
+
+    def test_restore_probe_data_populates_ipv6_defaults(self):
+        # Simulates deserializing an old cached record without IPv6 fields
+        probe = restore_probe_data(
+            {
+                "tcp_ping_ms": 80.0,
+                "ttfb_ms": 200.0,
+                "actual_ip": "1.2.3.4",
+                "actual_geo": "US",
+                "asn_org": "Test Org",
+                "fraud_score": 10,
+            }
+        )
+        self.assertFalse(probe.ipv6_support)
+        self.assertEqual(probe.actual_ipv6, "")
+
+    def test_round_trip_with_ipv6_fields(self):
+        # Verifies round-trip serialization with IPv6 details populated
+        node = make_node()
+        node.analyzed_node.probe.ipv6_support = True
+        node.analyzed_node.probe.actual_ipv6 = "2001:db8::1"
+
+        restored = _tested_nodes_from_json(_tested_nodes_to_json([node]))
+        restored_probe = restored[0].analyzed_node.probe
+        self.assertTrue(restored_probe.ipv6_support)
+        self.assertEqual(restored_probe.actual_ipv6, "2001:db8::1")
 
 
 if __name__ == "__main__":

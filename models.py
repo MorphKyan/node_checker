@@ -61,6 +61,8 @@ class ProbeData:
     is_backbone: bool = False
     backbone_info: str = ""
     profile: NodeProfile = field(default_factory=NodeProfile)
+    ipv6_support: bool = False
+    actual_ipv6: str = ""
 
 @dataclass
 class AnalyzedNode:

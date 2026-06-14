@@ -62,8 +62,8 @@ class RuntimeSettingsRequest(BaseModel):
     CACHE_ENABLED: Optional[bool] = None
     PROBE_CACHE_TTL_SECONDS: Optional[int] = Field(default=None, ge=60)
     CACHE_FAILURE_RESULTS: Optional[bool] = None
-    SUBSCRIPTION_MAX_BYTES: Optional[int] = Field(default=None, ge=1024, le=50 * 1024 * 1024)
-    SPEEDTEST_MAX_BYTES: Optional[int] = Field(default=None, ge=1024 * 1024, le=256 * 1024 * 1024)
+    SUBSCRIPTION_MAX_M: Optional[int] = Field(default=None, ge=1, le=50)
+    SPEEDTEST_MAX_M: Optional[int] = Field(default=None, ge=1, le=256)
     SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH: Optional[int] = Field(default=None, ge=16, le=160)
     SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: Optional[int] = Field(default=None, ge=32, le=240)
     TTFB_TARGET_URL: Optional[str] = Field(default=None, min_length=1)
@@ -129,6 +129,67 @@ async def list_subscriptions() -> list[dict]:
     ]
 
 
+@app.get("/subscriptions/enhanced", response_class=PlainTextResponse)
+async def get_enhanced_subscription(
+    subscription_ids: list[str] = Query(..., alias="subscription_id"),
+    limit: Optional[int] = Query(default=None, ge=1),
+    min_score: Optional[float] = Query(default=None, ge=0.0, le=100.0),
+    mode: Literal["compact", "detailed"] = "compact",
+    format: Literal["base64", "plain"] = "base64",
+    valid_only: bool = Query(default=True),
+):
+    from module_node_identity import make_node_fingerprint
+
+    # 1. Verify all requested subscriptions exist
+    for sub_id in subscription_ids:
+        ensure_subscription(sub_id)
+
+    # 2. Retrieve latest results and aggregate nodes
+    aggregated_nodes_map = {}
+    has_results = False
+    for sub_id in subscription_ids:
+        result = ApiStore.get_latest_result(sub_id)
+        if result:
+            has_results = True
+            for node in result["nodes"]:
+                # 3. Deduplication using make_node_fingerprint
+                fp = make_node_fingerprint(node.analyzed_node.node)
+                existing = aggregated_nodes_map.get(fp)
+                if not existing or node.analyzed_node.total_score > existing.analyzed_node.total_score:
+                    aggregated_nodes_map[fp] = node
+
+    if not has_results:
+        raise HTTPException(
+            status_code=409,
+            detail="No completed result is available for any of the subscriptions",
+        )
+
+    aggregated_nodes = list(aggregated_nodes_map.values())
+
+    # 4. Filter nodes by validity and minimum score
+    filtered_nodes = []
+    for node in aggregated_nodes:
+        if valid_only and not node.analyzed_node.is_valid:
+            continue
+        if min_score is not None and node.analyzed_node.total_score < min_score:
+            continue
+        filtered_nodes.append(node)
+
+    # 5. Sort nodes using SubscriptionExporter.sort_nodes
+    sorted_nodes = SubscriptionExporter.sort_nodes(filtered_nodes, valid_only=False)
+
+    # 6. Apply limit parameter
+    if limit is not None:
+        sorted_nodes = sorted_nodes[:limit]
+
+    # 7. Format remarks and construct base64 or plain output
+    plain = build_plain_subscription(sorted_nodes, mode=mode, valid_only=False)
+    if format == "plain":
+        return PlainTextResponse(plain)
+    uris = plain.splitlines()
+    return PlainTextResponse(SubscriptionExporter.encode_subscription(uris))
+
+
 @app.get("/subscriptions/{subscription_id}")
 async def get_subscription(subscription_id: str) -> dict:
     subscription = ensure_subscription(subscription_id)
@@ -163,20 +224,6 @@ async def delete_subscription(subscription_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Subscription not found")
     return {"deleted": True, "subscription_id": subscription_id}
 
-
-@app.get("/subscriptions/{subscription_id}/enhanced", response_class=PlainTextResponse)
-async def get_enhanced_subscription(
-    subscription_id: str,
-    mode: Literal["compact", "detailed"] = "compact",
-    format: Literal["base64", "plain"] = "base64",
-    valid_only: bool = Query(default=True),
-):
-    result = latest_result_or_409(subscription_id)
-    plain = build_plain_subscription(result["nodes"], mode=mode, valid_only=valid_only)
-    if format == "plain":
-        return PlainTextResponse(plain)
-    uris = plain.splitlines()
-    return PlainTextResponse(SubscriptionExporter.encode_subscription(uris))
 
 
 @app.get("/subscriptions/{subscription_id}/results")

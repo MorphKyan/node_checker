@@ -106,6 +106,31 @@ class SubscriptionTemplateTests(unittest.TestCase):
         self.assertIn("Old", remark)
         self.assertNotIn(" |  | ", remark)
 
+    def test_clean_original_remark_removes_duplicate_geos_and_flags(self):
+        # 1. Test static method clean_original_remark directly
+        self.assertEqual(SubscriptionExporter.clean_original_remark("🇯🇵 JP-01", "JP"), "01")
+        self.assertEqual(SubscriptionExporter.clean_original_remark("香港 02", "HK"), "02")
+        self.assertEqual(SubscriptionExporter.clean_original_remark("JP", "JP"), "")
+        self.assertEqual(SubscriptionExporter.clean_original_remark("JP2", "JP"), "JP2")
+        self.assertEqual(SubscriptionExporter.clean_original_remark("Japan-Node", "JP"), "Node")
+        self.assertEqual(SubscriptionExporter.clean_original_remark("Example Node", "JP"), "Example Node")
+
+        # 2. Test build_remark integrates it correctly in detailed mode
+        tested = make_tested_node(
+            "vless://uuid@example.com:443?security=tls#JP-01",
+            "🇯🇵 JP-01",
+            88.0,
+            220.0,
+            0.0,
+            asn_org="",
+            actual_geo="JP",
+        )
+        remark = SubscriptionExporter.build_remark(tested, "detailed", 96)
+        # Should contain Japan flag JP at the beginning, but end with "01" instead of "🇯🇵 JP-01"
+        self.assertTrue(remark.startswith("🇯🇵 JP"))
+        self.assertTrue(remark.endswith("01"))
+        self.assertNotIn("🇯🇵 JP-01", remark)
+
 
 class SubscriptionExportBehaviorTests(unittest.TestCase):
     def test_filter_sort_and_skip_invalid_nodes(self):

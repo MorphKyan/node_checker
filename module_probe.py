@@ -251,6 +251,43 @@ class LightweightProbe:
         return sum(results) / len(results)
 
     @staticmethod
+    async def detect_ipv6(socks5_url: str) -> tuple[bool, str]:
+        # Try api6.ipify.org first
+        try:
+            connector = ProxyConnector.from_url(socks5_url, rdns=True)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get("https://api6.ipify.org?format=json", timeout=settings.API_TIMEOUT) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        ip = data.get("ip", "").strip()
+                        if ip:
+                            try:
+                                ipaddress.ip_address(ip)
+                                return True, ip
+                            except ValueError:
+                                pass
+        except Exception:
+            pass
+
+        # Fallback to v6.ident.me
+        try:
+            connector = ProxyConnector.from_url(socks5_url, rdns=True)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get("http://v6.ident.me", timeout=settings.API_TIMEOUT) as resp:
+                    if resp.status == 200:
+                        ip = (await resp.text()).strip()
+                        if ip:
+                            try:
+                                ipaddress.ip_address(ip)
+                                return True, ip
+                            except ValueError:
+                                pass
+        except Exception:
+            pass
+
+        return False, ""
+
+    @staticmethod
     async def trace_route(ip: str) -> tuple[str, bool, bool, str]:
         import re, ipaddress
         try:
@@ -372,6 +409,7 @@ class LightweightProbe:
     async def run_probe(node: VlessNode, socks5_url: str) -> ProbeData:
         tcp_ping_task = asyncio.create_task(LightweightProbe.tcp_ping(node.server_ip, node.server_port))
         trace_task = asyncio.create_task(LightweightProbe.trace_route(node.server_ip))
+        ipv6_task = asyncio.create_task(LightweightProbe.detect_ipv6(socks5_url))
         
         ttfb_ms = 9999.0
         actual_ip = ""
@@ -460,6 +498,7 @@ class LightweightProbe:
         tcp_ping_ms = await tcp_ping_task
         
         trace_path, is_detour, is_backbone, backbone_info = await trace_task
+        ipv6_support, actual_ipv6 = await ipv6_task
         profile = NodeProfileAggregator.aggregate([
             ProfileAdapters.from_ipwhois(ipwhois_data),
             ProfileAdapters.from_ipapi(ipapi_data),
@@ -492,5 +531,7 @@ class LightweightProbe:
             is_detour=is_detour,
             is_backbone=is_backbone,
             backbone_info=backbone_info,
-            profile=profile
+            profile=profile,
+            ipv6_support=ipv6_support,
+            actual_ipv6=actual_ipv6
         )

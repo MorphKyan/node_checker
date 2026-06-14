@@ -21,10 +21,10 @@ The service should be treated as a "subscription relay + node profiling + qualit
 ## Primary Use Cases
 
 - Personal enhanced subscription relay: convert unreadable provider node names into names that include geo, network type, risk type, score, and latency.
-- Node quality dashboard: inspect latency, TTFB, speed, ASN, exit IP, route detour, backbone hints, risk score, and API evidence.
+- Node quality dashboard: inspect latency, TTFB, speed, ASN, exit IP, route detour, backbone hints, risk score, source-by-source API verdicts, and conflict warning indicators.
 - Subscription cleanup: export only valid nodes and sort by score, TTFB, and speed.
-- Future multi-source aggregation: combine several upstream subscriptions, deduplicate, score, filter, and publish one clean downstream subscription.
-- Future policy exports: generate different subscription URLs for different client needs, such as high-score only, residential only, region-specific, or excluding VPN/proxy/Tor nodes.
+- Multi-source aggregation: combine several upstream subscriptions, deduplicate via connection fingerprint, score, filter (e.g., by min_score), limit returned quantity, and publish one clean aggregated downstream subscription.
+- Policy exports: generate different subscription URLs for different client needs, such as filtering by min_score, valid_only, and limit.
 
 ## Directory Structure
 
@@ -87,10 +87,10 @@ The profile output is evidence-based and probabilistic. Residential detection is
 Near-term useful improvements:
 
 - Configurable naming templates while preserving safe URI rewriting.
-- Filtered enhanced exports, such as `min_score`, `geo`, `network`, `exclude_type`, `max_ttfb`, and `limit`.
-- Better profile transparency in the frontend, including source-by-source API verdicts and conflict display.
+- Configurable routing filters (e.g., region-specific geo, network type, exclude_type, max_ttfb).
+- Better profile transparency in the frontend, including source-by-source API verdicts and conflict display (implemented).
 - Historical result storage so users can see nodes changing IP, label, score, or route over time.
-- Multi-subscription merge, dedupe, and policy-based downstream exports.
+- Multi-subscription merge, dedupe, score filtering, and limit slicing (implemented in `/subscriptions/enhanced`).
 
 Public or shared deployments should be a separate milestone because they require security and operational work beyond the current local tool design.
 

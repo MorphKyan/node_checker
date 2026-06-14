@@ -89,9 +89,175 @@ class ApiStore:
                         updated_at INTEGER NOT NULL,
                         FOREIGN KEY(subscription_id) REFERENCES subscriptions(id)
                     );
+
+                    CREATE TABLE IF NOT EXISTS singbox_templates (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    );
                     """
                 )
                 conn.commit()
+
+                # Pre-populate with default template if table is empty
+                count = conn.execute("SELECT count(*) FROM singbox_templates").fetchone()[0]
+                if count == 0:
+                    tpl_id = f"tpl_{uuid.uuid4().hex[:12]}"
+                    default_content = """{
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "/etc/sing-box/cache.db",
+      "store_fakeip": true
+    }
+  },
+  // 出站
+  "outbounds": [
+    // 手动选择国家或地区节点；根据“国家或地区出站”的名称对 `outbounds` 值进行增删改，须一一对应
+    { "tag": "🚀 节点选择", "type": "selector", "outbounds": [ "♻️ 自动选择", "👉 手动选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点", "🇺🇸 加州节点" ] },
+    // 选择`🎯 全球直连`为测试本地网络（运营商网络速度和 IPv6 支持情况），可选择其它节点用于测试机场节点速度和 IPv6 支持情况
+    { "tag": "📈 网络测试", "type": "selector", "outbounds": [ "🎯 全球直连", "🚀 节点选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点", "🇺🇸 加州节点" ] },
+    { "tag": "🕹️ 游戏平台", "type": "selector", "outbounds": [ "🎯 全球直连", "🚀 节点选择" ] },
+    { "tag": "🤖 AI 平台", "type": "selector", "outbounds": [ "🇺🇸 加州节点" ] },
+    { "tag": "🌍 国外媒体", "type": "selector", "outbounds": [ "🚀 节点选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点" ] },
+    { "tag": "🌎 国外域名", "type": "selector", "outbounds": [ "🚀 节点选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点" ] },
+    { "tag": "📲 电报消息", "type": "selector", "outbounds": [ "🚀 节点选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点" ] },
+    { "tag": "🐟 漏网之鱼", "type": "selector", "outbounds": [ "🎯 全球直连", "🚀 节点选择", "👉 手动选择" ] },
+    { "tag": "🎯 全球直连", "type": "selector", "outbounds": [ "DIRECT" ] },
+    { "tag": "DIRECT", "type": "direct" },
+    { "tag": "GLOBAL", "type": "selector", "outbounds": [ "🚀 节点选择", "DIRECT" ] },
+    
+    // -------------------- 国家或地区出站 --------------------
+    // 自动选择节点，即按照 url 测试结果使用延迟最低的节点；测试后容差大于 50ms 才会切换到延迟低的那个节点；筛选出“香港”节点，支持正则表达式
+    { "tag": "🇭🇰 香港节点", "type": "urltest", "include": "(?i)(🇭🇰|港|hk|hongkong|hong kong)" },
+    // 节点自动回退，默认选择第一个节点，节点超时后则会按代理顺序选择下一个可用节点，以此类推。也被叫做“故障转移”
+    { "tag": "🇹🇼 台湾节点", "type": "urltest", "use_all_nodes": true, "include": "(?i)(🇹🇼|台|tw|taiwan|tai wan)" },
+    // 节点负载均衡，即将请求均匀分配到多个节点上，优点是更稳定，速度可能有提升；将相同的目标地址请求分配给该出站内的同一个节点；推荐在节点复用比较多的情况下使用
+    { "tag": "🇯🇵 日本节点", "type": "urltest", "include": "(?i)(🇯🇵|日|jp|japan)" },
+    // 可使用 `"use_all_nodes": true` 代替，意思为引入所有出站节点
+    { "tag": "🇸🇬 新加坡节点", "type": "urltest", "use_all_nodes": true, "include": "(?i)(🇸🇬|新|sg|singapore)" },
+    { "tag": "🇺🇸 美国节点", "type": "urltest", "tolerance": 100, "include": "(?i)(🇺🇸|美|us|unitedstates|united states)" },
+    { "tag": "🇺🇸 加州节点", "type": "selector", "include": "(?i)(加州|加利福尼亚|California|CA)" },
+    { "tag": "♻️ 自动选择", "type": "urltest", "tolerance": 100, "use_all_nodes": true },
+    { "tag": "👉 手动选择", "type": "selector", "use_all_nodes": true }
+  ],
+  // 路由
+  "route": {
+    // 域名解析器，必须在 `dns.servers` 配置有 `dns_direct`
+    "default_domain_resolver": "dns_direct",
+    // 规则
+    "rules": [
+      // 若使用 ShellCrash，可进入 7 → 4 启用域名嗅探后删除此条 `action`
+      { "action": "sniff" },
+      // 若使用 ShellCrash，可进入 7 → 4 启用域名嗅探后删除此条 `action`
+      { "protocol": [ "dns" ], "action": "hijack-dns" },
+      // 若使用 ShellCrash，会自动覆写此条，可删除此条 `clash_mode`
+      { "clash_mode": "direct", "outbound": "DIRECT" },
+      // 若使用 ShellCrash，会自动覆写此条，可删除此条 `clash_mode`
+      { "clash_mode": "global", "outbound": "GLOBAL" },
+      // 自定义规则优先放前面
+      { "rule_set": [ "private" ], "outbound": "🎯 全球直连" },
+      { "rule_set": [ "ads" ], "action": "reject" },
+      { "rule_set": [ "games" ], "outbound": "🕹️ 游戏平台" },
+      { "rule_set": [ "media" ], "outbound": "🌍 国外媒体" },
+      { "rule_set": [ "ai" ], "outbound": "🤖 AI 平台" },
+      { "rule_set": [ "networktest" ], "outbound": "📈 网络测试" },
+      { "rule_set": [ "tld-proxy" ], "outbound": "🌎 国外域名" },
+      { "rule_set": [ "gfw" ], "outbound": "🌎 国外域名" },
+      { "rule_set": [ "telegramip" ], "outbound": "📲 电报消息" },
+      // 将目标域名解析成 IP 后与下方的 IP 规则进行匹配，提高兼容性
+      { "action": "resolve" },
+      { "rule_set": [ "mediaip" ], "outbound": "🌍 国外媒体" }
+    ],
+    // 规则集（binary 文件每天自动更新）
+    "rule_set": [
+      {
+        "tag": "ads",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/ads.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "private",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/private.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "games",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/games.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "media",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/media.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "ai",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/ai.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "networktest",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/networktest.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "tld-proxy",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/tld-proxy.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "gfw",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/gfw.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "telegramip",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/telegramip.srs",
+        "download_detour": "DIRECT"
+      },
+      {
+        "tag": "mediaip",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/mediaip.srs",
+        "download_detour": "DIRECT"
+      }
+    ],
+    // 默认出站，即没有命中规则的域名或 IP 走该规则
+    "final": "🐟 漏网之鱼",
+    "auto_detect_interface": true
+  }
+}"""
+                    conn.execute(
+                        """
+                        INSERT INTO singbox_templates (
+                            id, name, content, created_at, updated_at
+                        ) VALUES (?, '默认模板', ?, ?, ?)
+                        """,
+                        (tpl_id, default_content, cls.now(), cls.now()),
+                    )
+                    conn.commit()
                 cls._initialized_paths.add(db_path)
             finally:
                 conn.close()
@@ -582,3 +748,113 @@ class ApiStore:
             return data
         finally:
             conn.close()
+
+    @staticmethod
+    def new_template_id() -> str:
+        return f"tpl_{uuid.uuid4().hex[:12]}"
+
+    @classmethod
+    def list_singbox_templates(cls) -> list[dict]:
+        cls.init_db()
+        conn = cls.connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM singbox_templates ORDER BY created_at DESC"
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    @classmethod
+    def get_singbox_template(cls, template_id: str) -> dict | None:
+        cls.init_db()
+        conn = cls.connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM singbox_templates WHERE id = ?",
+                (template_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    @classmethod
+    def create_singbox_template(cls, name: str, content: str) -> dict:
+        cls.init_db()
+        tpl_id = cls.new_template_id()
+        now = cls.now()
+        with cls._write_lock:
+            conn = cls.connect()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO singbox_templates (
+                        id, name, content, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (tpl_id, name, content, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return cls.get_singbox_template(tpl_id)
+
+    @classmethod
+    def update_singbox_template(
+        cls,
+        template_id: str,
+        *,
+        name: str | None = None,
+        content: str | None = None,
+    ) -> dict | None:
+        cls.init_db()
+        existing = cls.get_singbox_template(template_id)
+        if not existing:
+            return None
+        updates = []
+        values = []
+        if name is not None:
+            updates.append("name = ?")
+            values.append(name)
+        if content is not None:
+            updates.append("content = ?")
+            values.append(content)
+        if not updates:
+            return existing
+
+        now = cls.now()
+        updates.append("updated_at = ?")
+        values.append(now)
+        values.append(template_id)
+        with cls._write_lock:
+            conn = cls.connect()
+            try:
+                conn.execute(
+                    f"UPDATE singbox_templates SET {', '.join(updates)} WHERE id = ?",
+                    values,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return cls.get_singbox_template(template_id)
+
+    @classmethod
+    def delete_singbox_template(cls, template_id: str) -> bool:
+        cls.init_db()
+        with cls._write_lock:
+            conn = cls.connect()
+            try:
+                existing = conn.execute(
+                    "SELECT id FROM singbox_templates WHERE id = ?",
+                    (template_id,),
+                ).fetchone()
+                if not existing:
+                    return False
+                conn.execute(
+                    "DELETE FROM singbox_templates WHERE id = ?",
+                    (template_id,),
+                )
+                conn.commit()
+                return True
+            finally:
+                conn.close()

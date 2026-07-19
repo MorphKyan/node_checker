@@ -91,6 +91,12 @@ class VlessParser:
                     raise ValueError("Missing server host or port")
                 
                 params = dict(urllib.parse.parse_qsl(params_str))
+                transport_type = params.get("type", "tcp")
+                transport_path = (
+                    params.get("serviceName") or params.get("path", "")
+                    if transport_type == "grpc"
+                    else params.get("path", "")
+                )
                 
                 expected_geo = "Unknown"
                 remark_lower = remark.lower()
@@ -109,12 +115,14 @@ class VlessParser:
                     flow=params.get("flow", ""),
                     security=params.get("security", ""),
                     sni=params.get("sni", ""),
+                    alpn=params.get("alpn", ""),
                     fp=params.get("fp", ""),
                     pbk=params.get("pbk", ""),
                     sid=params.get("sid", ""),
-                    type=params.get("type", "tcp"),
-                    path=params.get("path", ""),
-                    host=params.get("host", "")
+                    type=transport_type,
+                    path=transport_path,
+                    host=params.get("host", ""),
+                    mode=params.get("mode", "")
                 ))
             except Exception as e:
                 print(f"[Parser] Failed to parse line: {line[:30]}... Error: {e}")

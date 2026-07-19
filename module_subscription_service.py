@@ -8,7 +8,7 @@ from module_api_store import ApiStore
 from module_cache import ProbeCache
 from module_parser import VlessParser
 from module_probe import LightweightProbe
-from module_setup import setup_singbox
+from module_setup import setup_singbox, setup_xray
 from module_tunnel import TunnelController
 from settings import settings
 
@@ -175,6 +175,7 @@ class SubscriptionRefreshService:
         force_probe: bool = False,
     ) -> list[TestedNode]:
         setup_singbox()
+        setup_xray()
         await ProbeCache.init_db()
         subscription = ApiStore.get_subscription(subscription_id)
         if not subscription:

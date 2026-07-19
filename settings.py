@@ -11,6 +11,8 @@ BASE_DIR = Path(__file__).resolve().parent
 class Config:
     # 代理内核路径
     SING_BOX_PATH = os.getenv("SING_BOX_PATH", "sing-box.exe")
+    XRAY_PATH = os.getenv("XRAY_PATH", "xray.exe")
+    PROXY_CORE = os.getenv("PROXY_CORE", "sing-box")
 
     # 并发与超时控制
     FILTER_CONCURRENCY = 10

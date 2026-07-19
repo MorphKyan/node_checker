@@ -17,9 +17,55 @@ describe("api client", () => {
   });
 
   it("builds enhanced subscription URLs", () => {
-    expect(enhancedUrl("", "sub_1", { mode: "detailed", format: "plain", valid_only: false })).toBe(
-      "/subscriptions/enhanced?subscription_id=sub_1&mode=detailed&format=plain&valid_only=false",
+    expect(enhancedUrl("", "sub_1", { mode: "detailed", format: "plain", valid_only: false, limit: 20 })).toBe(
+      "/subscriptions/enhanced?subscription_id=sub_1&mode=detailed&format=plain&valid_only=false&limit=20",
     );
+    expect(enhancedUrl("", ["sub_1", "sub_2"], { mode: "compact", format: "base64", valid_only: true })).toBe(
+      "/subscriptions/enhanced?subscription_id=sub_1&subscription_id=sub_2&mode=compact&format=base64&valid_only=true",
+    );
+  });
+
+  it("passes enhanced export limits to preview requests", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("payload", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    })));
+
+    const client = createApiClient("http://api.local");
+    const result = await client.getEnhanced("sub_1", {
+      mode: "compact",
+      format: "base64",
+      valid_only: true,
+      limit: 10,
+    });
+
+    expect(result).toBe("payload");
+    expect(fetch).toHaveBeenCalledWith(
+      "http://api.local/subscriptions/enhanced?subscription_id=sub_1&mode=compact&format=base64&valid_only=true&limit=10",
+      expect.any(Object),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("passes multiple subscriptions to enhanced preview requests", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("payload", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    })));
+
+    const client = createApiClient("http://api.local");
+    const result = await client.getEnhanced(["sub_1", "sub_2"], {
+      mode: "compact",
+      format: "base64",
+      valid_only: true,
+    });
+
+    expect(result).toBe("payload");
+    expect(fetch).toHaveBeenCalledWith(
+      "http://api.local/subscriptions/enhanced?subscription_id=sub_1&subscription_id=sub_2&mode=compact&format=base64&valid_only=true",
+      expect.any(Object),
+    );
+    vi.unstubAllGlobals();
   });
 
   it("loads settings metadata", async () => {

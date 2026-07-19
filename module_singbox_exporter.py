@@ -1,4 +1,3 @@
-import copy
 import json
 import re
 from models import TestedNode
@@ -19,6 +18,24 @@ def strip_comments(json_str: str) -> str:
         
     return regex.sub(replacer, json_str)
 
+
+def _parse_singbox_template(content: str) -> dict:
+    cleaned_json = strip_comments(content)
+    try:
+        template = json.loads(cleaned_json)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse template JSON: {e}") from e
+
+    if not isinstance(template, dict):
+        raise ValueError("Template must be a JSON object")
+
+    return template
+
+
+def validate_singbox_template_content(content: str) -> None:
+    _parse_singbox_template(content)
+
+
 def generate_singbox_config(
     template_str: str,
     tested_nodes: list[TestedNode],
@@ -30,14 +47,7 @@ def generate_singbox_config(
     Matches template outbounds by regex tags and appends node outbounds.
     """
     # 1. Clean and parse template
-    cleaned_json = strip_comments(template_str)
-    try:
-        config = json.loads(cleaned_json)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse template JSON: {e}")
-
-    if not isinstance(config, dict):
-        raise ValueError("Template must be a JSON object")
+    config = _parse_singbox_template(template_str)
 
     # 2. Sort and build remark tags for the tested nodes
     sorted_nodes = SubscriptionExporter.sort_nodes(tested_nodes, valid_only=False)
@@ -63,37 +73,44 @@ def generate_singbox_config(
         if vless.flow:
             outbound["flow"] = vless.flow
 
-        # TLS / Reality
         if vless.security in ["tls", "reality"]:
             tls_config = {
                 "enabled": True,
-                "server_name": vless.sni or "",
                 "insecure": False,
-                "utls": {
-                    "enabled": bool(vless.fp),
-                    "fingerprint": vless.fp or "chrome"
-                }
+                "alpn": (
+                    [item for item in vless.alpn.split(",") if item]
+                    if vless.alpn
+                    else ["h2", "http/1.1"]
+                ),
             }
-            if vless.security == "reality":
-                tls_config["reality"] = {
+            if vless.sni:
+                tls_config["server_name"] = vless.sni
+            if vless.fp:
+                tls_config["utls"] = {
                     "enabled": True,
-                    "public_key": vless.pbk or "",
-                    "short_id": vless.sid or ""
+                    "fingerprint": vless.fp,
                 }
+            if vless.security == "reality":
+                reality_config = {"enabled": True}
+                if vless.pbk:
+                    reality_config["public_key"] = vless.pbk
+                if vless.sid:
+                    reality_config["short_id"] = vless.sid
+                tls_config["reality"] = reality_config
             outbound["tls"] = tls_config
 
-        # Transport
         if vless.type == "ws":
-            outbound["transport"] = {
-                "type": "ws",
-                "path": vless.path or "",
-                "headers": {"Host": vless.host} if vless.host else {}
-            }
+            transport = {"type": "ws"}
+            if vless.path:
+                transport["path"] = vless.path
+            if vless.host:
+                transport["headers"] = {"Host": vless.host}
+            outbound["transport"] = transport
         elif vless.type == "grpc":
-            outbound["transport"] = {
-                "type": "grpc",
-                "service_name": vless.path or ""
-            }
+            transport = {"type": "grpc"}
+            if vless.path:
+                transport["service_name"] = vless.path
+            outbound["transport"] = transport
             
         node_outbounds.append(outbound)
         node_tags.append(tag)

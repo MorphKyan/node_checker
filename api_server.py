@@ -13,7 +13,7 @@ from module_cache import ProbeCache
 from module_runtime_settings import RuntimeSettings
 from module_subscription_exporter import SubscriptionExporter
 from module_subscription_service import SubscriptionRefreshService
-from module_singbox_exporter import generate_singbox_config
+from module_singbox_exporter import generate_singbox_config, validate_singbox_template_content
 
 
 
@@ -69,6 +69,7 @@ class RuntimeSettingsRequest(BaseModel):
     SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: Optional[int] = Field(default=None, ge=32, le=240)
     TTFB_TARGET_URL: Optional[str] = Field(default=None, min_length=1)
     SPEEDTEST_URL: Optional[str] = Field(default=None, min_length=1)
+    PROXY_CORE: Optional[str] = Field(default=None, pattern="^(sing-box|xray)$")
 
 
 class SingboxTemplateCreateRequest(BaseModel):
@@ -117,6 +118,120 @@ def latest_result_or_409(subscription_id: str) -> dict:
     return result
 
 
+def normalize_filter_values(values: Optional[list[str]]) -> set[str]:
+    if not values:
+        return set()
+
+    normalized = set()
+    for value in values:
+        for part in value.split(","):
+            part = part.strip()
+            if part:
+                normalized.add(part.casefold())
+    return normalized
+
+
+def label_filter_values(labels) -> set[str]:
+    from module_profile import DISPLAY_LABELS
+
+    values = set()
+    for label in labels:
+        if label.label:
+            values.add(label.label.casefold())
+            values.add(DISPLAY_LABELS.get(label.label, label.label).casefold())
+    return values
+
+
+def enhanced_node_matches_filters(
+    node,
+    *,
+    geo_values: set[str],
+    network_values: set[str],
+    exclude_type_values: set[str],
+    max_ttfb: Optional[float],
+) -> bool:
+    analyzed = node.analyzed_node
+    probe = analyzed.probe
+    profile = probe.profile
+
+    if geo_values and (probe.actual_geo or "").casefold() not in geo_values:
+        return False
+    if network_values and not (label_filter_values(profile.network_labels) & network_values):
+        return False
+    if exclude_type_values and (label_filter_values(profile.risk_labels) & exclude_type_values):
+        return False
+    if max_ttfb is not None:
+        if probe.ttfb_ms is None or probe.ttfb_ms > max_ttfb:
+            return False
+    return True
+
+
+def build_enhanced_subscription_response(
+    subscription_ids: list[str],
+    *,
+    limit: Optional[int],
+    min_score: Optional[float],
+    mode: Literal["compact", "detailed"],
+    format: Literal["base64", "plain"],
+    valid_only: bool,
+    geo: Optional[list[str]],
+    network: Optional[list[str]],
+    exclude_type: Optional[list[str]],
+    max_ttfb: Optional[float],
+) -> PlainTextResponse:
+    from module_node_identity import make_node_fingerprint
+
+    for sub_id in subscription_ids:
+        ensure_subscription(sub_id)
+
+    aggregated_nodes_map = {}
+    has_results = False
+    for sub_id in subscription_ids:
+        result = ApiStore.get_latest_result(sub_id)
+        if result:
+            has_results = True
+            for node in result["nodes"]:
+                fp = make_node_fingerprint(node.analyzed_node.node)
+                existing = aggregated_nodes_map.get(fp)
+                if not existing or node.analyzed_node.total_score > existing.analyzed_node.total_score:
+                    aggregated_nodes_map[fp] = node
+
+    if not has_results:
+        raise HTTPException(
+            status_code=409,
+            detail="No completed result is available for any of the subscriptions",
+        )
+
+    filtered_nodes = []
+    geo_values = normalize_filter_values(geo)
+    network_values = normalize_filter_values(network)
+    exclude_type_values = normalize_filter_values(exclude_type)
+    for node in aggregated_nodes_map.values():
+        if valid_only and not node.analyzed_node.is_valid:
+            continue
+        if min_score is not None and node.analyzed_node.total_score < min_score:
+            continue
+        if not enhanced_node_matches_filters(
+            node,
+            geo_values=geo_values,
+            network_values=network_values,
+            exclude_type_values=exclude_type_values,
+            max_ttfb=max_ttfb,
+        ):
+            continue
+        filtered_nodes.append(node)
+
+    sorted_nodes = SubscriptionExporter.sort_nodes(filtered_nodes, valid_only=False)
+    if limit is not None:
+        sorted_nodes = sorted_nodes[:limit]
+
+    plain = build_plain_subscription(sorted_nodes, mode=mode, valid_only=False)
+    if format == "plain":
+        return PlainTextResponse(plain)
+    uris = plain.splitlines()
+    return PlainTextResponse(SubscriptionExporter.encode_subscription(uris))
+
+
 @app.post("/subscriptions")
 async def create_subscription(payload: SubscriptionCreateRequest) -> dict:
     subscription = ApiStore.create_subscription(payload.url, payload.name)
@@ -148,57 +263,50 @@ async def get_enhanced_subscription(
     mode: Literal["compact", "detailed"] = "compact",
     format: Literal["base64", "plain"] = "base64",
     valid_only: bool = Query(default=True),
+    geo: Optional[list[str]] = Query(default=None),
+    network: Optional[list[str]] = Query(default=None),
+    exclude_type: Optional[list[str]] = Query(default=None),
+    max_ttfb: Optional[float] = Query(default=None, ge=0.0),
 ):
-    from module_node_identity import make_node_fingerprint
+    return build_enhanced_subscription_response(
+        subscription_ids,
+        limit=limit,
+        min_score=min_score,
+        mode=mode,
+        format=format,
+        valid_only=valid_only,
+        geo=geo,
+        network=network,
+        exclude_type=exclude_type,
+        max_ttfb=max_ttfb,
+    )
 
-    # 1. Verify all requested subscriptions exist
-    for sub_id in subscription_ids:
-        ensure_subscription(sub_id)
 
-    # 2. Retrieve latest results and aggregate nodes
-    aggregated_nodes_map = {}
-    has_results = False
-    for sub_id in subscription_ids:
-        result = ApiStore.get_latest_result(sub_id)
-        if result:
-            has_results = True
-            for node in result["nodes"]:
-                # 3. Deduplication using make_node_fingerprint
-                fp = make_node_fingerprint(node.analyzed_node.node)
-                existing = aggregated_nodes_map.get(fp)
-                if not existing or node.analyzed_node.total_score > existing.analyzed_node.total_score:
-                    aggregated_nodes_map[fp] = node
-
-    if not has_results:
-        raise HTTPException(
-            status_code=409,
-            detail="No completed result is available for any of the subscriptions",
-        )
-
-    aggregated_nodes = list(aggregated_nodes_map.values())
-
-    # 4. Filter nodes by validity and minimum score
-    filtered_nodes = []
-    for node in aggregated_nodes:
-        if valid_only and not node.analyzed_node.is_valid:
-            continue
-        if min_score is not None and node.analyzed_node.total_score < min_score:
-            continue
-        filtered_nodes.append(node)
-
-    # 5. Sort nodes using SubscriptionExporter.sort_nodes
-    sorted_nodes = SubscriptionExporter.sort_nodes(filtered_nodes, valid_only=False)
-
-    # 6. Apply limit parameter
-    if limit is not None:
-        sorted_nodes = sorted_nodes[:limit]
-
-    # 7. Format remarks and construct base64 or plain output
-    plain = build_plain_subscription(sorted_nodes, mode=mode, valid_only=False)
-    if format == "plain":
-        return PlainTextResponse(plain)
-    uris = plain.splitlines()
-    return PlainTextResponse(SubscriptionExporter.encode_subscription(uris))
+@app.get("/subscriptions/{subscription_id}/enhanced", response_class=PlainTextResponse)
+async def get_single_enhanced_subscription(
+    subscription_id: str,
+    limit: Optional[int] = Query(default=None, ge=1),
+    min_score: Optional[float] = Query(default=None, ge=0.0, le=100.0),
+    mode: Literal["compact", "detailed"] = "compact",
+    format: Literal["base64", "plain"] = "base64",
+    valid_only: bool = Query(default=True),
+    geo: Optional[list[str]] = Query(default=None),
+    network: Optional[list[str]] = Query(default=None),
+    exclude_type: Optional[list[str]] = Query(default=None),
+    max_ttfb: Optional[float] = Query(default=None, ge=0.0),
+):
+    return build_enhanced_subscription_response(
+        [subscription_id],
+        limit=limit,
+        min_score=min_score,
+        mode=mode,
+        format=format,
+        valid_only=valid_only,
+        geo=geo,
+        network=network,
+        exclude_type=exclude_type,
+        max_ttfb=max_ttfb,
+    )
 
 
 @app.get("/subscriptions/{subscription_id}")
@@ -305,6 +413,10 @@ async def list_singbox_templates() -> list[dict]:
 
 @app.post("/singbox/templates")
 async def create_singbox_template(payload: SingboxTemplateCreateRequest) -> dict:
+    try:
+        validate_singbox_template_content(payload.content)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"Invalid Sing-box template content: {e}")
     return ApiStore.create_singbox_template(payload.name, payload.content)
 
 
@@ -321,6 +433,11 @@ async def update_singbox_template(template_id: str, payload: SingboxTemplateUpda
     data = payload.model_dump(exclude_unset=True)
     if not data:
         raise HTTPException(status_code=422, detail="No fields to update")
+    if "content" in data:
+        try:
+            validate_singbox_template_content(data["content"])
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"Invalid Sing-box template content: {e}")
     updated = ApiStore.update_singbox_template(template_id, **data)
     if not updated:
         raise HTTPException(status_code=404, detail="Template not found")

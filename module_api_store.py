@@ -30,6 +30,16 @@ class ApiStore:
         return settings.API_DB_PATH
 
     @classmethod
+    def default_singbox_template(cls) -> str:
+        template_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "examples",
+            "singbox_template.yaml",
+        )
+        with open(template_path, "r", encoding="utf-8") as template_file:
+            return template_file.read()
+
+    @classmethod
     def connect(cls):
         conn = sqlite3.connect(cls.db_path(), timeout=30)
         conn.row_factory = sqlite3.Row
@@ -249,13 +259,14 @@ class ApiStore:
     "auto_detect_interface": true
   }
 }"""
+                    default_content = cls.default_singbox_template()
                     conn.execute(
                         """
                         INSERT INTO singbox_templates (
                             id, name, content, created_at, updated_at
-                        ) VALUES (?, '默认模板', ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?)
                         """,
-                        (tpl_id, default_content, cls.now(), cls.now()),
+                        (tpl_id, "默认模板", default_content, cls.now(), cls.now()),
                     )
                     conn.commit()
                 cls._initialized_paths.add(db_path)

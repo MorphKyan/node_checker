@@ -18,9 +18,10 @@ EDITABLE_SETTINGS: dict[str, type] = {
     "SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH": int,
     "TTFB_TARGET_URL": str,
     "SPEEDTEST_URL": str,
+    "PROXY_CORE": str,
 }
 
-SETTING_LIMITS: dict[str, dict[str, int]] = {
+SETTING_LIMITS: dict[str, dict[str, Any]] = {
     "FILTER_CONCURRENCY": {"min": 1, "max": 100},
     "SPEEDTEST_CONCURRENCY": {"min": 1, "max": 20},
     "API_DEFAULT_SPEEDTEST_LIMIT": {"min": 0, "max": 100},
@@ -31,6 +32,7 @@ SETTING_LIMITS: dict[str, dict[str, int]] = {
     "SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH": {"min": 32, "max": 240},
     "TTFB_TARGET_URL": {"min_length": 1},
     "SPEEDTEST_URL": {"min_length": 1},
+    "PROXY_CORE": {"options": ["sing-box", "xray"]},
 }
 
 
@@ -90,6 +92,9 @@ class RuntimeSettings:
             min_length = limits.get("min_length")
             if min_length is not None and len(value) < min_length:
                 raise ValueError(f"{key} must not be empty")
+            options = limits.get("options")
+            if options is not None and value not in options:
+                raise ValueError(f"{key} must be one of {options}")
             return value
         return value
 

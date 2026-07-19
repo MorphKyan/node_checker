@@ -1,19 +1,19 @@
 import asyncio
+import hashlib
 import json
-import os
-import sqlite3
 import time
+from dataclasses import asdict
+from pathlib import Path
 
 from models import ProbeData, VlessNode
+from module_api_store import ApiStore
 from module_node_identity import make_node_fingerprint, make_node_identity
-from module_result_codec import probe_data_to_json, restore_probe_data
+from module_result_codec import restore_probe_data
 from settings import settings
 
 
 class ProbeCache:
-    _init_lock = asyncio.Lock()
     _write_lock = asyncio.Lock()
-    _initialized_paths: set[str] = set()
 
     @staticmethod
     def make_node_fingerprint(node: VlessNode) -> str:
@@ -23,116 +23,51 @@ class ProbeCache:
     def make_node_identity(node: VlessNode) -> str:
         return make_node_identity(node)
 
+    @staticmethod
+    def probe_config_snapshot(probe_config=None, api_sites=None) -> dict:
+        if probe_config is not None:
+            return probe_config
+        if api_sites is None:
+            return ApiStore.get_probe_config_snapshot()
+        return {"api_sites": api_sites, "exit_ip_endpoint": ApiStore.get_exit_ip_endpoint()}
+
     @classmethod
-    def connect(cls) -> sqlite3.Connection:
-        conn = sqlite3.connect(settings.CACHE_DB_PATH, timeout=30)
-        conn.execute("PRAGMA busy_timeout = 30000")
-        return conn
+    def config_signature(cls, api_sites=None, *, probe_config=None) -> str:
+        snapshot = cls.probe_config_snapshot(probe_config, api_sites)
+        payload = {"target": settings.TTFB_TARGET_URL, "times": settings.PROBE_TEST_TIMES, "ttfb_timeout": settings.TTFB_TIMEOUT, "api_timeout": settings.API_TIMEOUT, "exit_ip_endpoint": snapshot["exit_ip_endpoint"], "sites": snapshot["api_sites"]}
+        # Keys must influence invalidation but never appear in paths or logs.
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:20]
+
+    @classmethod
+    def _path(cls, node: VlessNode, signature: str) -> Path:
+        key = hashlib.sha256(f"{cls.make_node_fingerprint(node)}:{signature}".encode()).hexdigest()
+        return ApiStore.data_dir() / "probe-cache" / f"{key}.json"
 
     @classmethod
     async def init_db(cls) -> None:
-        db_path = settings.CACHE_DB_PATH
-        if db_path in cls._initialized_paths:
-            return
-
-        async with cls._init_lock:
-            if db_path in cls._initialized_paths:
-                return
-
-            db_dir = os.path.dirname(db_path)
-            if db_dir:
-                os.makedirs(db_dir, exist_ok=True)
-
-            conn = cls.connect()
-            try:
-                conn.execute("PRAGMA journal_mode = WAL")
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS probe_cache (
-                        fingerprint TEXT PRIMARY KEY,
-                        node_identity TEXT NOT NULL,
-                        probe_json TEXT NOT NULL,
-                        created_at INTEGER NOT NULL,
-                        updated_at INTEGER NOT NULL,
-                        expires_at INTEGER NOT NULL
-                    )
-                    """
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-            cls._initialized_paths.add(db_path)
+        (ApiStore.data_dir() / "probe-cache").mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    async def get(cls, node: VlessNode) -> ProbeData | None:
-        if not settings.CACHE_ENABLED:
+    async def get(cls, node: VlessNode, api_sites=None, *, probe_config=None) -> ProbeData | None:
+        if not settings.CACHE_ENABLED: return None
+        snapshot = cls.probe_config_snapshot(probe_config, api_sites)
+        path = cls._path(node, cls.config_signature(probe_config=snapshot))
+        data = ApiStore._read_json(path)
+        if not isinstance(data, dict) or data.get("expires_at", 0) < time.time():
+            path.unlink(missing_ok=True)
             return None
-
-        await cls.init_db()
-        fingerprint = cls.make_node_fingerprint(node)
-        now = int(time.time())
-
-        conn = cls.connect()
         try:
-            row = conn.execute(
-                "SELECT probe_json, expires_at FROM probe_cache WHERE fingerprint = ?",
-                (fingerprint,),
-            ).fetchone()
-        finally:
-            conn.close()
-
-        if not row:
-            return None
-
-        probe_json, expires_at = row
-        if expires_at < now:
-            return None
-
-        try:
-            data = json.loads(probe_json)
-            return restore_probe_data(data)
-        except Exception as e:
-            print(f"[Cache Error] Failed to load cache for {node.remark}: {e}")
+            return restore_probe_data(data["probe"])
+        except (KeyError, TypeError, ValueError):
+            path.unlink(missing_ok=True)
             return None
 
     @classmethod
-    async def set(cls, node: VlessNode, probe_data: ProbeData) -> None:
-        if not settings.CACHE_ENABLED:
-            return
-
-        if not settings.CACHE_FAILURE_RESULTS:
-            if probe_data.tcp_ping_ms >= 9999.0 or probe_data.ttfb_ms >= 9999.0:
-                return
-
-        await cls.init_db()
-        fingerprint = cls.make_node_fingerprint(node)
-        node_identity = cls.make_node_identity(node)
-        probe_json = probe_data_to_json(probe_data)
-        now = int(time.time())
-        expires_at = now + int(settings.PROBE_CACHE_TTL_SECONDS)
-
+    async def set(cls, node: VlessNode, probe_data: ProbeData, api_sites=None, *, probe_config=None) -> None:
+        if not settings.CACHE_ENABLED: return
+        if not settings.CACHE_FAILURE_RESULTS and probe_data.ttfb_ms >= 9999.0: return
+        snapshot = cls.probe_config_snapshot(probe_config, api_sites)
+        signature = cls.config_signature(probe_config=snapshot)
+        value = {"fingerprint": cls.make_node_fingerprint(node), "node_identity": cls.make_node_identity(node), "config_signature": signature, "created_at": int(time.time()), "expires_at": int(time.time()) + int(settings.PROBE_CACHE_TTL_SECONDS), "probe": asdict(probe_data)}
         async with cls._write_lock:
-            conn = cls.connect()
-            try:
-                existing = conn.execute(
-                    "SELECT created_at FROM probe_cache WHERE fingerprint = ?",
-                    (fingerprint,),
-                ).fetchone()
-                created_at = existing[0] if existing else now
-                conn.execute(
-                    """
-                    INSERT INTO probe_cache (
-                        fingerprint, node_identity, probe_json, created_at, updated_at, expires_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(fingerprint) DO UPDATE SET
-                        node_identity = excluded.node_identity,
-                        probe_json = excluded.probe_json,
-                        updated_at = excluded.updated_at,
-                        expires_at = excluded.expires_at
-                    """,
-                    (fingerprint, node_identity, probe_json, created_at, now, expires_at),
-                )
-                conn.commit()
-            finally:
-                conn.close()
+            ApiStore._atomic_write(cls._path(node, signature), value)

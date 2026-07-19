@@ -11,8 +11,8 @@ raw subscription URL
   -> node parsing
   -> temporary tunnel probing
   -> IP intelligence aggregation
-  -> node profile and score
-  -> SQLite result storage
+  -> node profile and risk aggregation
+  -> JSON result storage
   -> enhanced subscription URL / dashboard / reports
 ```
 
@@ -20,11 +20,11 @@ The service should be treated as a "subscription relay + node profiling + qualit
 
 ## Primary Use Cases
 
-- Personal enhanced subscription relay: convert unreadable provider node names into names that include geo, network type, risk type, score, and latency.
+- Personal enhanced subscription relay: convert unreadable provider node names into names that include geo, network type, risk type, risk, and latency.
 - Node quality dashboard: inspect latency, TTFB, speed, ASN, exit IP, route detour, backbone hints, risk score, source-by-source API verdicts, and conflict warning indicators.
-- Subscription cleanup: export only valid nodes and sort by score, TTFB, and speed.
-- Multi-source aggregation: combine several upstream subscriptions, deduplicate via connection fingerprint, score, filter (e.g., by min_score), limit returned quantity, and publish one clean aggregated downstream subscription.
-- Policy exports: generate different subscription URLs for different client needs, such as filtering by min_score, valid_only, and limit.
+- Subscription cleanup: export only valid nodes and sort by risk, TTFB, and speed.
+- Multi-source aggregation: combine several upstream subscriptions, deduplicate via connection fingerprint, filter (e.g., by max_risk), limit returned quantity, and publish one clean aggregated downstream subscription.
+- Policy exports: generate different subscription URLs for different client needs, such as filtering by max_risk, valid_only, and limit.
 
 ## Directory Structure
 
@@ -37,10 +37,10 @@ The service should be treated as a "subscription relay + node profiling + qualit
 - `module_tunnel.py`: Temporary `sing-box` process lifecycle and per-node tunnel config handling.
 - `module_probe.py`: TCP ping, TTFB, exit IP lookup, IP intelligence API calls, traceroute analysis, and profile aggregation input.
 - `module_profile.py`: Normalizes IP intelligence responses into network labels, risk labels, risk scores, confidence, and evidence.
-- `module_analyzer.py`: Validity checks and final score calculation based on latency, risk, and geo matching.
+- `module_analyzer.py`: Validity checks based solely on successful TTFB.
 - `module_speedtest.py`: Top-N download speed test for selected valid nodes.
-- `module_cache.py`: Probe result cache backed by SQLite.
-- `module_api_store.py`: API SQLite storage for subscriptions, refresh jobs, and latest completed results.
+- `module_cache.py`: Probe result cache backed by JSON files.
+- `module_api_store.py`: JSON storage for subscriptions, refresh jobs, and latest completed results.
 - `module_subscription_service.py`: Async refresh orchestration for API jobs.
 - `module_subscription_exporter.py`: Enhanced VLESS URI generation, name templating, sorting, dedupe, truncation, and base64 encoding.
 - `module_exporter.py`: CLI Markdown summary and per-node detailed report generation.
@@ -80,7 +80,7 @@ The profile output is evidence-based and probabilistic. Residential detection is
 - Probe and speedtest work is network-heavy. Preserve Top-N speedtest behavior and concurrency controls unless the user explicitly asks for a wider scan.
 - Cache probe results when possible. `force_probe` should bypass cache reads but still write fresh results.
 - Avoid starting duplicate refresh jobs for the same subscription. The API should return the active queued/running job instead.
-- Keep SQLite as the default local storage layer unless the user asks for a multi-user or server deployment design.
+- Keep JSON as the default local storage layer unless the user asks for a multi-user or server deployment design.
 
 ## Product Roadmap Notes
 
@@ -89,8 +89,8 @@ Near-term useful improvements:
 - Configurable naming templates while preserving safe URI rewriting.
 - Configurable routing filters (e.g., region-specific geo, network type, exclude_type, max_ttfb).
 - Better profile transparency in the frontend, including source-by-source API verdicts and conflict display (implemented).
-- Historical result storage so users can see nodes changing IP, label, score, or route over time.
-- Multi-subscription merge, dedupe, score filtering, and limit slicing (implemented in `/subscriptions/enhanced`).
+- Historical result storage so users can see nodes changing IP, label, risk, or route over time.
+- Multi-subscription merge, dedupe, risk filtering, and limit slicing (implemented in `/subscriptions/enhanced`).
 
 Public or shared deployments should be a separate milestone because they require security and operational work beyond the current local tool design.
 

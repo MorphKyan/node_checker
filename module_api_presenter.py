@@ -85,8 +85,8 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                 "detailed_uri": SubscriptionExporter.rewrite_vless_remark(node.raw_uri, detailed_name),
                 "is_valid": analyzed.is_valid,
                 "reject_reason": analyzed.reject_reason,
-                "total_score": analyzed.total_score,
                 "download_speed_mbps": tested.download_speed_mbps,
+                "speedtest_status": tested.speedtest_status,
                 "probe": {
                     "tcp_ping_ms": probe.tcp_ping_ms,
                     "ttfb_ms": probe.ttfb_ms,
@@ -111,6 +111,8 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                     "evidence": [
                         {
                             "source": verdict.source,
+                            "site_id": verdict.site_id,
+                            "status": verdict.status,
                             "network_labels": [
                                 {
                                     "label": label.label,

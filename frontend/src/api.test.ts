@@ -84,6 +84,43 @@ describe("api client", () => {
     vi.unstubAllGlobals();
   });
 
+  it("manages API sites without exposing keys", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ sites: [{ id: "ipwhois", api_key_configured: true }], exit_ip_endpoint: "https://ip.example" }), {
+      status: 200, headers: { "content-type": "application/json" },
+    })));
+    const client = createApiClient("http://api.local");
+    const result = await client.getApiSites();
+    expect(result.sites[0].api_key_configured).toBe(true);
+    expect(fetch).toHaveBeenCalledWith("http://api.local/api-sites", expect.any(Object));
+    vi.unstubAllGlobals();
+  });
+
+  it("sends API-site CRUD, ordering, key clear, endpoint, and speed-refresh requests", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "site", deleted: true, exit_ip_endpoint: "https://exit.example", job_id: "job", subscription_id: "sub", status: "queued" }), {
+      status: 200, headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createApiClient("http://api.local");
+
+    await client.createApiSite({ id: "site", column_name: "Site", provider: "ipwhois", url_template: "https://site.example/{ip}?key={key}", api_key: "secret", weight: 1, enabled: true });
+    await client.updateApiSite("site", { clear_api_key: true, enabled: false });
+    await client.orderApiSites(["site", "other"]);
+    await client.updateExitIpEndpoint("https://exit.example");
+    await client.deleteApiSite("site");
+    await client.refreshSubscription("sub", { speedtest_limit: 2, force_probe: true });
+
+    const requests = (fetchMock.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit]>).map(([url, init]) => ({ url, method: init.method, body: init.body }));
+    expect(requests).toEqual([
+      { url: "http://api.local/api-sites", method: "POST", body: JSON.stringify({ id: "site", column_name: "Site", provider: "ipwhois", url_template: "https://site.example/{ip}?key={key}", api_key: "secret", weight: 1, enabled: true }) },
+      { url: "http://api.local/api-sites/site", method: "PATCH", body: JSON.stringify({ clear_api_key: true, enabled: false }) },
+      { url: "http://api.local/api-sites/order", method: "PUT", body: JSON.stringify({ ids: ["site", "other"] }) },
+      { url: "http://api.local/exit-ip-endpoint", method: "PATCH", body: JSON.stringify({ exit_ip_endpoint: "https://exit.example" }) },
+      { url: "http://api.local/api-sites/site", method: "DELETE", body: undefined },
+      { url: "http://api.local/subscriptions/sub/refresh", method: "POST", body: JSON.stringify({ speedtest_limit: 2, force_probe: true }) },
+    ]);
+    vi.unstubAllGlobals();
+  });
+
   it("cancels jobs", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       job_id: "job_1",

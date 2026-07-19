@@ -82,6 +82,34 @@ class SingboxTemplateUpdateRequest(BaseModel):
     content: Optional[str] = Field(default=None, min_length=1)
 
 
+class ApiSiteRequest(BaseModel):
+    id: str = Field(..., min_length=1)
+    column_name: str = Field(..., min_length=1)
+    provider: str
+    url_template: str = Field(..., min_length=1)
+    api_key: str = ""
+    weight: float = Field(default=1.0, gt=0)
+    enabled: bool = False
+
+
+class ApiSiteUpdateRequest(BaseModel):
+    column_name: Optional[str] = Field(default=None, min_length=1)
+    provider: Optional[str] = None
+    url_template: Optional[str] = Field(default=None, min_length=1)
+    api_key: Optional[str] = None
+    clear_api_key: bool = False
+    weight: Optional[float] = Field(default=None, gt=0)
+    enabled: Optional[bool] = None
+
+
+class ApiSiteOrderRequest(BaseModel):
+    ids: list[str]
+
+
+class ExitIpEndpointRequest(BaseModel):
+    exit_ip_endpoint: str = Field(..., min_length=1)
+
+
 def ensure_subscription(subscription_id: str) -> dict:
     subscription = ApiStore.get_subscription(subscription_id)
     if not subscription:
@@ -170,7 +198,7 @@ def build_enhanced_subscription_response(
     subscription_ids: list[str],
     *,
     limit: Optional[int],
-    min_score: Optional[float],
+    max_risk: Optional[float],
     mode: Literal["compact", "detailed"],
     format: Literal["base64", "plain"],
     valid_only: bool,
@@ -193,7 +221,7 @@ def build_enhanced_subscription_response(
             for node in result["nodes"]:
                 fp = make_node_fingerprint(node.analyzed_node.node)
                 existing = aggregated_nodes_map.get(fp)
-                if not existing or node.analyzed_node.total_score > existing.analyzed_node.total_score:
+                if not existing or SubscriptionExporter.sort_nodes([node, existing], valid_only=False)[0] is node:
                     aggregated_nodes_map[fp] = node
 
     if not has_results:
@@ -209,7 +237,8 @@ def build_enhanced_subscription_response(
     for node in aggregated_nodes_map.values():
         if valid_only and not node.analyzed_node.is_valid:
             continue
-        if min_score is not None and node.analyzed_node.total_score < min_score:
+        risk = node.analyzed_node.probe.profile.risk_score
+        if max_risk is not None and (risk is None or risk > max_risk):
             continue
         if not enhanced_node_matches_filters(
             node,
@@ -259,7 +288,7 @@ async def list_subscriptions() -> list[dict]:
 async def get_enhanced_subscription(
     subscription_ids: list[str] = Query(..., alias="subscription_id"),
     limit: Optional[int] = Query(default=None, ge=1),
-    min_score: Optional[float] = Query(default=None, ge=0.0, le=100.0),
+    max_risk: Optional[float] = Query(default=None, ge=0.0, le=100.0),
     mode: Literal["compact", "detailed"] = "compact",
     format: Literal["base64", "plain"] = "base64",
     valid_only: bool = Query(default=True),
@@ -271,7 +300,7 @@ async def get_enhanced_subscription(
     return build_enhanced_subscription_response(
         subscription_ids,
         limit=limit,
-        min_score=min_score,
+        max_risk=max_risk,
         mode=mode,
         format=format,
         valid_only=valid_only,
@@ -286,7 +315,7 @@ async def get_enhanced_subscription(
 async def get_single_enhanced_subscription(
     subscription_id: str,
     limit: Optional[int] = Query(default=None, ge=1),
-    min_score: Optional[float] = Query(default=None, ge=0.0, le=100.0),
+    max_risk: Optional[float] = Query(default=None, ge=0.0, le=100.0),
     mode: Literal["compact", "detailed"] = "compact",
     format: Literal["base64", "plain"] = "base64",
     valid_only: bool = Query(default=True),
@@ -298,7 +327,7 @@ async def get_single_enhanced_subscription(
     return build_enhanced_subscription_response(
         [subscription_id],
         limit=limit,
-        min_score=min_score,
+        max_risk=max_risk,
         mode=mode,
         format=format,
         valid_only=valid_only,
@@ -357,6 +386,7 @@ async def get_subscription_results(subscription_id: str) -> dict:
         "node_count": result["node_count"],
         "valid_count": result["valid_count"],
         "updated_at": result["updated_at"],
+        "api_sites_snapshot": result.get("api_sites_snapshot", []),
         "nodes": build_detail_nodes(result["nodes"]),
     }
 
@@ -404,6 +434,58 @@ async def update_settings(payload: RuntimeSettingsRequest) -> dict:
     if not data:
         raise HTTPException(status_code=422, detail="No settings to update")
     return RuntimeSettings.apply(data)
+
+
+@app.get("/api-sites")
+async def list_api_sites() -> dict:
+    return {"exit_ip_endpoint": ApiStore.get_exit_ip_endpoint(), "sites": ApiStore.get_api_sites()}
+
+
+@app.get("/api-sites/providers")
+async def list_api_site_providers() -> list[str]:
+    return ApiStore.provider_types()
+
+
+@app.post("/api-sites")
+async def create_api_site(payload: ApiSiteRequest) -> dict:
+    try:
+        return ApiStore.create_api_site(payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.patch("/api-sites/{site_id}")
+async def update_api_site(site_id: str, payload: ApiSiteUpdateRequest) -> dict:
+    try:
+        updated = ApiStore.update_api_site(site_id, payload.model_dump(exclude_unset=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if not updated:
+        raise HTTPException(status_code=404, detail="API site not found")
+    return updated
+
+
+@app.delete("/api-sites/{site_id}")
+async def delete_api_site(site_id: str) -> dict:
+    if not ApiStore.delete_api_site(site_id):
+        raise HTTPException(status_code=404, detail="API site not found")
+    return {"deleted": True, "id": site_id}
+
+
+@app.put("/api-sites/order")
+async def order_api_sites(payload: ApiSiteOrderRequest) -> list[dict]:
+    try:
+        return ApiStore.order_api_sites(payload.ids)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.patch("/exit-ip-endpoint")
+async def update_exit_ip_endpoint(payload: ExitIpEndpointRequest) -> dict:
+    try:
+        return {"exit_ip_endpoint": ApiStore.update_exit_ip_endpoint(payload.exit_ip_endpoint)}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/singbox/templates")
@@ -456,7 +538,7 @@ async def get_singbox_subscription(
     subscription_ids: list[str] = Query(..., alias="subscription_id"),
     template_id: Optional[str] = Query(default=None),
     limit: Optional[int] = Query(default=None, ge=1),
-    min_score: Optional[float] = Query(default=None, ge=0.0, le=100.0),
+    max_risk: Optional[float] = Query(default=None, ge=0.0, le=100.0),
     mode: Literal["compact", "detailed"] = "compact",
     valid_only: bool = Query(default=True),
 ):
@@ -488,7 +570,7 @@ async def get_singbox_subscription(
                 # Deduplication using make_node_fingerprint
                 fp = make_node_fingerprint(node.analyzed_node.node)
                 existing = aggregated_nodes_map.get(fp)
-                if not existing or node.analyzed_node.total_score > existing.analyzed_node.total_score:
+                if not existing or SubscriptionExporter.sort_nodes([node, existing], valid_only=False)[0] is node:
                     aggregated_nodes_map[fp] = node
 
     if not has_results:
@@ -499,12 +581,13 @@ async def get_singbox_subscription(
 
     aggregated_nodes = list(aggregated_nodes_map.values())
 
-    # 4. Filter nodes by validity and minimum score
+    # 4. Filter nodes by validity and explicit maximum risk
     filtered_nodes = []
     for node in aggregated_nodes:
         if valid_only and not node.analyzed_node.is_valid:
             continue
-        if min_score is not None and node.analyzed_node.total_score < min_score:
+        risk = node.analyzed_node.probe.profile.risk_score
+        if max_risk is not None and (risk is None or risk > max_risk):
             continue
         filtered_nodes.append(node)
 

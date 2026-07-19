@@ -27,9 +27,7 @@ COPY . .
 # Set environment variables for docker setup
 ENV SING_BOX_PATH=sing-box
 ENV XRAY_PATH=xray
-ENV CACHE_DB_PATH=/app/data/probe_cache.sqlite3
-ENV API_DB_PATH=/app/data/api.sqlite3
-ENV RUNTIME_SETTINGS_PATH=/app/data/runtime_settings.json
+ENV DATA_DIR=/app/data
 
 # Expose FastAPI server port
 EXPOSE 8000

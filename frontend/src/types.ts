@@ -35,6 +35,8 @@ export interface LabelEvidence {
 
 export interface ApiVerdict {
   source: string;
+  site_id: string;
+  status: "success" | "timeout" | "rate_limited" | "error" | "no_data";
   network_labels: LabelEvidence[];
   risk_labels: LabelEvidence[];
   risk_score: number | null;
@@ -49,7 +51,7 @@ export interface NodeProbe {
   asn_org: string;
   ipv6_support: boolean;
   actual_ipv6: string;
-  risk_score: number;
+  risk_score: number | null;
   network_labels: string[];
   type_labels: string[];
   confidence: string;
@@ -69,8 +71,8 @@ export interface NodeResult {
   detailed_uri: string;
   is_valid: boolean;
   reject_reason: string;
-  total_score: number;
-  download_speed_mbps: number;
+  download_speed_mbps: number | null;
+  speedtest_status: "not_tested" | "failed" | "success";
   probe: NodeProbe;
 }
 
@@ -82,7 +84,35 @@ export interface SubscriptionResults {
   node_count: number;
   valid_count: number;
   updated_at: number;
+  api_sites_snapshot: ApiSite[];
   nodes: NodeResult[];
+}
+
+export interface ApiSite {
+  id: string;
+  column_name: string;
+  provider: string;
+  url_template: string;
+  weight: number;
+  enabled: boolean;
+  order: number;
+  api_key_configured: boolean;
+}
+
+export interface ApiSitesConfig {
+  exit_ip_endpoint: string;
+  sites: ApiSite[];
+}
+
+export interface ApiSiteInput {
+  id: string;
+  column_name: string;
+  provider: string;
+  url_template: string;
+  api_key?: string;
+  clear_api_key?: boolean;
+  weight: number;
+  enabled: boolean;
 }
 
 export interface RuntimeSettings {

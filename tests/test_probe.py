@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -6,73 +7,53 @@ from module_probe import LightweightProbe
 
 
 class LightweightProbeTests(unittest.TestCase):
-    def test_run_probe_falls_back_to_direct_ip_intelligence(self):
+    def test_empty_snapshot_does_not_fallback_to_current_sites(self):
         async def run_case():
-            node = VlessNode(
-                raw_uri="vless://uuid@example.com:443?security=tls#US",
-                uuid="uuid",
-                server_ip="example.com",
-                server_port=443,
-                remark="US",
-                expected_geo="US",
-            )
-
+            node = VlessNode("vless://uuid@example.com:443#US", "uuid", "example.com", 443, "US", "US")
             with (
                 patch.object(LightweightProbe, "tcp_ping", new=AsyncMock(return_value=80.0)),
-                patch.object(LightweightProbe, "trace_route", new=AsyncMock(return_value=("No trace path", False, False, ""))),
                 patch.object(LightweightProbe, "test_ttfb", new=AsyncMock(return_value=210.0)),
-                patch.object(LightweightProbe, "fetch_ip_info", new=AsyncMock(side_effect=RuntimeError("proxy failed"))),
-                patch.object(LightweightProbe, "resolve_probe_target_ip", new=AsyncMock(return_value="8.8.8.8")),
-                patch.object(LightweightProbe, "fetch_ipwhois_direct", new=AsyncMock(return_value=("Clean", {
-                    "success": True,
-                    "ip": "8.8.8.8",
-                    "country_code": "US",
-                    "connection": {"org": "Google LLC"},
-                    "security": {
-                        "proxy": False,
-                        "vpn": False,
-                        "tor": False,
-                        "hosting": False,
-                    },
-                }))),
-                patch.object(LightweightProbe, "fetch_ipapi", new=AsyncMock(return_value=("Clean", {
-                    "is_proxy": False,
-                    "is_vpn": False,
-                    "is_tor": False,
-                    "is_datacenter": True,
-                }))) as ipapi,
-                patch.object(LightweightProbe, "fetch_scamalytics", new=AsyncMock(return_value=("Not configured", None))),
-                patch.object(LightweightProbe, "fetch_proxycheck", new=AsyncMock(return_value=("Clean", {
-                    "status": "ok",
-                    "8.8.8.8": {
-                        "detections": {
-                            "proxy": False,
-                            "vpn": False,
-                            "tor": False,
-                            "hosting": False,
-                        },
-                    },
-                }))) as proxycheck,
-                patch.object(LightweightProbe, "fetch_abstract", new=AsyncMock(return_value=("Not configured", None))),
-                patch.object(LightweightProbe, "fetch_ip2location", new=AsyncMock(return_value=("Usage:DCH", {
-                    "usage_type": "DCH",
-                    "is_proxy": False,
-                }))) as ip2location,
+                patch.object(LightweightProbe, "trace_route", new=AsyncMock(return_value=("", False, False, ""))),
+                patch.object(LightweightProbe, "detect_ipv6", new=AsyncMock(return_value=(False, ""))),
+                patch.object(LightweightProbe, "_fetch_exit_ip", new=AsyncMock(return_value=("8.8.8.8", {"country_code": "US"}))),
+                patch("module_api_store.ApiStore.get_api_sites", side_effect=AssertionError("must not read current sites")),
             ):
-                probe = await LightweightProbe.run_probe(node, "socks5://127.0.0.1:1080")
-
+                probe = await LightweightProbe.run_probe(node, "socks5://127.0.0.1:1080", api_sites=[])
             self.assertEqual(probe.actual_ip, "8.8.8.8")
-            self.assertEqual(probe.actual_geo, "US")
-            self.assertEqual(probe.asn_org, "Google LLC")
-            ipapi.assert_awaited_once_with("8.8.8.8")
-            proxycheck.assert_awaited_once_with("8.8.8.8")
-            ip2location.assert_awaited_once_with("8.8.8.8")
-            self.assertNotEqual(probe.profile.display_labels, ["未知"])
-
-        import asyncio
-
+            self.assertIsNone(probe.profile.risk_score)
         asyncio.run(run_case())
 
+    def test_registry_status_and_risk_are_aggregated(self):
+        async def run_case():
+            node = VlessNode("vless://uuid@example.com:443#US", "uuid", "example.com", 443, "US", "US")
+            site = {"id": "ipwhois", "column_name": "ipwho.is", "provider": "ipwhois", "url_template": "https://example/{ip}", "weight": 2, "enabled": True}
+            with (
+                patch.object(LightweightProbe, "tcp_ping", new=AsyncMock(return_value=9999.0)),
+                patch.object(LightweightProbe, "test_ttfb", new=AsyncMock(return_value=110.0)),
+                patch.object(LightweightProbe, "trace_route", new=AsyncMock(return_value=("", False, False, ""))),
+                patch.object(LightweightProbe, "detect_ipv6", new=AsyncMock(return_value=(False, ""))),
+                patch.object(LightweightProbe, "_fetch_exit_ip", new=AsyncMock(return_value=("1.1.1.1", {"country_code": "US"}))),
+                patch.object(LightweightProbe, "_fetch_site", new=AsyncMock(return_value=({"success": True, "security": {"proxy": True}}, "success"))),
+            ):
+                probe = await LightweightProbe.run_probe(node, "socks5://127.0.0.1:1080", [site])
+            self.assertEqual(probe.profile.evidence[0].site_id, "ipwhois")
+            self.assertEqual(probe.profile.evidence[0].status, "success")
+            self.assertLess(probe.ttfb_ms, 9999.0)
+        asyncio.run(run_case())
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_explicit_probe_config_uses_its_frozen_exit_endpoint(self):
+        async def run_case():
+            node = VlessNode("vless://uuid@example.com:443#US", "uuid", "example.com", 443, "US", "US")
+            snapshot = {"api_sites": [], "exit_ip_endpoint": "https://old-exit.example.test"}
+            fetch_exit = AsyncMock(return_value=("9.9.9.9", {"country_code": "US"}))
+            with (
+                patch.object(LightweightProbe, "tcp_ping", new=AsyncMock(return_value=80.0)),
+                patch.object(LightweightProbe, "test_ttfb", new=AsyncMock(return_value=210.0)),
+                patch.object(LightweightProbe, "trace_route", new=AsyncMock(return_value=("", False, False, ""))),
+                patch.object(LightweightProbe, "detect_ipv6", new=AsyncMock(return_value=(False, ""))),
+                patch.object(LightweightProbe, "_fetch_exit_ip", new=fetch_exit),
+                patch("module_api_store.ApiStore.get_exit_ip_endpoint", side_effect=AssertionError("must use snapshot")),
+            ):
+                await LightweightProbe.run_probe(node, "socks5://127.0.0.1:1080", probe_config=snapshot)
+            fetch_exit.assert_awaited_once_with("socks5://127.0.0.1:1080", "https://old-exit.example.test")
+        asyncio.run(run_case())

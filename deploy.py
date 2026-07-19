@@ -75,7 +75,8 @@ def deploy():
         f"rm -f {remote_zip_path}",
         f"docker rm -f node-checker || true",
         f"cd {remote_deploy_dir} && (docker compose down || docker-compose down || true)",
-        f"cd {remote_deploy_dir} && (docker compose up --build -d || docker-compose up --build -d)"
+        f"cd {remote_deploy_dir} && docker build -t node-checker-node-checker:latest .",
+        f"cd {remote_deploy_dir} && (docker compose up -d || docker-compose up -d)"
     ]
 
     for cmd in commands:

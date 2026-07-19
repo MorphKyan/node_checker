@@ -1,6 +1,7 @@
 services:
   node-checker:
     build: .
+    image: node-checker-node-checker:latest
     container_name: node-checker
     networks:
       br0:

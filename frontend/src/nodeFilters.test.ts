@@ -6,15 +6,15 @@ function makeNode(overrides: Partial<NodeResult>): NodeResult {
   return {
     fingerprint: "fp",
     original_name: "JP",
-    enhanced_name_compact: "JP | 机房 | Clean | 92分",
-    enhanced_name_detailed: "JP | 机房 | Clean | 92分 | Example ASN",
+    enhanced_name_compact: "JP | 机房 | Clean | 风险 35",
+    enhanced_name_detailed: "JP | 机房 | Clean | 风险 35 | Example ASN",
     raw_uri: "vless://uuid@example.com:443#JP",
-    compact_uri: "vless://uuid@example.com:443#JP%20%7C%20%E6%9C%BA%E6%88%BF%20%7C%20Clean%20%7C%2092%E5%88%86",
-    detailed_uri: "vless://uuid@example.com:443#JP%20%7C%20%E6%9C%BA%E6%88%BF%20%7C%20Clean%20%7C%2092%E5%88%86%20%7C%20Example%20ASN",
+    compact_uri: "vless://uuid@example.com:443#JP%20%7C%20risk%2035",
+    detailed_uri: "vless://uuid@example.com:443#JP%20%7C%20risk%2035%20%7C%20Example%20ASN",
     is_valid: true,
     reject_reason: "",
-    total_score: 92,
     download_speed_mbps: 12,
+    speedtest_status: "success",
     probe: {
       tcp_ping_ms: 80,
       ttfb_ms: 210,
@@ -42,7 +42,7 @@ const emptyFilters = {
   nodeGeo: "all",
   nodeNetwork: "all",
   nodeType: "all",
-  minScore: "",
+  maxRisk: "",
   maxTtfb: "",
   minSpeed: "",
   detourFilter: "all",
@@ -50,12 +50,12 @@ const emptyFilters = {
 };
 
 describe("filterNodes", () => {
-  it("filters by profile, score, latency, and route attributes", () => {
+  it("filters by profile, risk, latency, and route attributes", () => {
     const nodes = [
       makeNode({ fingerprint: "good" }),
       makeNode({
         fingerprint: "slow",
-        total_score: 50,
+        // risk is intentionally below the max-risk threshold
         probe: { ...makeNode({}).probe, ttfb_ms: 900, network_labels: ["家宽"], is_backbone: false },
       }),
     ];
@@ -63,7 +63,7 @@ describe("filterNodes", () => {
     const result = filterNodes(nodes, {
       ...emptyFilters,
       nodeNetwork: "机房",
-      minScore: "80",
+      maxRisk: "80",
       maxTtfb: "300",
       backboneFilter: "yes",
     });

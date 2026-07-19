@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from models import AnalyzedNode, ProbeData, TestedNode, VlessNode
+from models import AnalyzedNode, NodeProfile, ProbeData, TestedNode, VlessNode
 from module_subscription_service import SubscriptionRefreshService
 from settings import settings
 
@@ -20,7 +20,7 @@ def make_node(index: int, expected_geo: str = "JP") -> VlessNode:
     )
 
 
-def make_analyzed_node(node: VlessNode, score: float = 90.0, actual_geo: str | None = None) -> AnalyzedNode:
+def make_analyzed_node(node: VlessNode, risk: float = 10.0, actual_geo: str | None = None) -> AnalyzedNode:
     return AnalyzedNode(
         node=node,
         probe=ProbeData(
@@ -29,10 +29,9 @@ def make_analyzed_node(node: VlessNode, score: float = 90.0, actual_geo: str | N
             actual_ip="203.0.113.10",
             actual_geo=actual_geo or node.expected_geo,
             asn_org="Example ASN",
-            fraud_score=20,
+            profile=NodeProfile(risk_score=risk),
         ),
         is_valid=True,
-        total_score=score,
         reject_reason="",
     )
 
@@ -60,7 +59,7 @@ class SubscriptionRefreshServiceTests(unittest.TestCase):
             active = 0
             max_active = 0
 
-            async def fake_filter(node, sem, force_probe=False):
+            async def fake_filter(node, sem, force_probe=False, api_sites=None, probe_config=None):
                 return make_analyzed_node(node)
 
             async def fake_speed_test(analyzed_node):
@@ -94,12 +93,12 @@ class SubscriptionRefreshServiceTests(unittest.TestCase):
 
     def test_select_speedtest_nodes_uses_top_nodes_per_region(self):
         analyzed_nodes = [
-            make_analyzed_node(make_node(1, "JP"), score=95),
-            make_analyzed_node(make_node(2, "JP"), score=80),
-            make_analyzed_node(make_node(3, "JP"), score=70),
-            make_analyzed_node(make_node(4, "US"), score=90),
-            make_analyzed_node(make_node(5, "US"), score=85),
-            make_analyzed_node(make_node(6, "US"), score=60),
+            make_analyzed_node(make_node(1, "JP"), risk=5),
+            make_analyzed_node(make_node(2, "JP"), risk=20),
+            make_analyzed_node(make_node(3, "JP"), risk=30),
+            make_analyzed_node(make_node(4, "US"), risk=10),
+            make_analyzed_node(make_node(5, "US"), risk=15),
+            make_analyzed_node(make_node(6, "US"), risk=40),
         ]
 
         nodes_to_test, nodes_to_skip = SubscriptionRefreshService.select_speedtest_nodes_per_region(

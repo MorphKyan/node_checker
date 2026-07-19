@@ -27,17 +27,20 @@ export function groupCount(values: string[]): Array<{ name: string; value: numbe
   return Array.from(counts.entries()).map(([name, value]) => ({ name, value }));
 }
 
-export function scoreBuckets(nodes: NodeResult[]) {
+export function riskBuckets(nodes: NodeResult[]) {
   const buckets = [
-    { name: "0-49", value: 0 },
-    { name: "50-69", value: 0 },
-    { name: "70-84", value: 0 },
-    { name: "85-100", value: 0 },
+    { name: "0-24", value: 0 },
+    { name: "25-49", value: 0 },
+    { name: "50-74", value: 0 },
+    { name: "75-100", value: 0 },
+    { name: "未知", value: 0 },
   ];
   for (const node of nodes) {
-    if (node.total_score < 50) buckets[0].value += 1;
-    else if (node.total_score < 70) buckets[1].value += 1;
-    else if (node.total_score < 85) buckets[2].value += 1;
+    const risk = node.probe.risk_score;
+    if (risk === null) buckets[4].value += 1;
+    else if (risk < 25) buckets[0].value += 1;
+    else if (risk < 50) buckets[1].value += 1;
+    else if (risk < 75) buckets[2].value += 1;
     else buckets[3].value += 1;
   }
   return buckets;

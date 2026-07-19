@@ -408,7 +408,7 @@ class NodeProfileAggregator:
             for item in verdict.risk_labels:
                 if item.label in RISK_LABELS and item.label != "unknown":
                     risk_scores_by_label[item.label] += item.confidence * weight
-            if verdict.risk_score is not None:
+            if verdict.status == "success" and verdict.risk_score is not None:
                 confidence = max(
                     [i.confidence for i in verdict.network_labels + verdict.risk_labels],
                     default=0.5,
@@ -445,14 +445,14 @@ class NodeProfileAggregator:
         risk_score = (
             weighted_risk_score / risk_score_weight
             if risk_score_weight
-            else NodeProfileAggregator._risk_from_aggregated_labels(network_labels, risk_labels)
+            else None
         )
 
         return NodeProfile(
             display_labels=display_labels,
             network_labels=network_labels,
             risk_labels=risk_labels,
-            risk_score=max(0.0, min(100.0, risk_score)),
+            risk_score=max(0.0, min(100.0, risk_score)) if risk_score is not None else None,
             confidence=NodeProfileAggregator._confidence_label(top_confidence),
             evidence=[replace(v) for v in verdicts],
         )

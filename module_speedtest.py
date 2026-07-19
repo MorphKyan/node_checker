@@ -49,4 +49,4 @@ class BandwidthTester:
         if elapsed > 0:
             download_speed_mbps = (downloaded_bytes * 8) / (1024 * 1024) / elapsed
 
-        return TestedNode(analyzed_node, download_speed_mbps)
+        return TestedNode(analyzed_node, download_speed_mbps if downloaded_bytes else None, "success" if downloaded_bytes else "failed")

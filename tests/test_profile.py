@@ -246,11 +246,10 @@ class ProfileExportIntegrationTests(unittest.TestCase):
             actual_ip="203.0.113.10",
             actual_geo="JP",
             asn_org="Example ASN",
-            fraud_score=20,
             profile=profile,
         )
         tested = TestedNode(
-            AnalyzedNode(node, probe, True, 90.0, "", "test score"),
+            AnalyzedNode(node, probe, True, ""),
             123.45,
         )
 

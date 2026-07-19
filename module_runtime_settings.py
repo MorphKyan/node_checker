@@ -1,5 +1,3 @@
-import json
-import os
 from typing import Any
 
 from settings import settings
@@ -38,11 +36,7 @@ SETTING_LIMITS: dict[str, dict[str, Any]] = {
 
 class RuntimeSettings:
     @staticmethod
-    def path() -> str:
-        return settings.RUNTIME_SETTINGS_PATH
-
-    @classmethod
-    def get_editable(cls) -> dict[str, Any]:
+    def get_editable() -> dict[str, Any]:
         return {key: getattr(settings, key) for key in EDITABLE_SETTINGS}
 
     @classmethod
@@ -57,15 +51,12 @@ class RuntimeSettings:
 
     @classmethod
     def load(cls) -> None:
-        path = cls.path()
-        if not os.path.exists(path):
-            return
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            from module_api_store import ApiStore
+            data = ApiStore.get_runtime_settings()
             cls.apply(data, persist=False)
-        except (OSError, json.JSONDecodeError, ValueError) as e:
-            print(f"[RuntimeSettings] Failed to load {path}: {e}")
+        except (OSError, ValueError) as e:
+            print(f"[RuntimeSettings] Failed to load JSON config: {e}")
 
     @staticmethod
     def validate_value(key: str, value: Any) -> Any:
@@ -111,10 +102,6 @@ class RuntimeSettings:
 
         current = cls.get_editable()
         if persist:
-            path = cls.path()
-            path_dir = os.path.dirname(path)
-            if path_dir:
-                os.makedirs(path_dir, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(current, f, ensure_ascii=False, indent=2)
+            from module_api_store import ApiStore
+            ApiStore.save_runtime_settings(current)
         return current

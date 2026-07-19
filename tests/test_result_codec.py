@@ -19,7 +19,6 @@ def make_node() -> TestedNode:
         actual_ip="203.0.113.10",
         actual_geo="JP",
         asn_org="Example ASN",
-        fraud_score=20,
         profile=NodeProfile(
             network_labels=[LabelEvidence("hosting", 0.9)],
             risk_labels=[LabelEvidence("vpn", 0.8)],
@@ -28,7 +27,7 @@ def make_node() -> TestedNode:
             evidence=[ApiVerdict("ipapi.is", raw_summary="is_vpn=true")],
         ),
     )
-    return TestedNode(AnalyzedNode(node, probe, True, 92.0, "", "test score"), 12.34)
+    return TestedNode(AnalyzedNode(node, probe, True, ""), 12.34, "success")
 
 
 class ResultCodecTests(unittest.TestCase):
@@ -49,7 +48,6 @@ class ResultCodecTests(unittest.TestCase):
                 "actual_ip": "",
                 "actual_geo": "Unknown",
                 "asn_org": "",
-                "fraud_score": 0,
             }
         )
 
@@ -64,7 +62,6 @@ class ResultCodecTests(unittest.TestCase):
                 "actual_ip": "1.2.3.4",
                 "actual_geo": "US",
                 "asn_org": "Test Org",
-                "fraud_score": 10,
             }
         )
         self.assertFalse(probe.ipv6_support)

@@ -82,18 +82,18 @@ class SubscriptionExporter:
         return f"{flag} {geo_code}" if flag else geo_code
 
     @staticmethod
-    def format_score(score: float) -> str:
-        return f"{score:.0f}分"
-
-    @staticmethod
     def format_latency(ms: float) -> str:
         if ms >= 9999.0:
             return "超时"
         return f"{ms:.0f}ms"
 
     @staticmethod
-    def format_speed(mbps: float) -> str:
-        if mbps <= 0:
+    def format_risk(score: float | None) -> str:
+        return "风险未知" if score is None else f"风险 {score:.0f}"
+
+    @staticmethod
+    def format_speed(mbps: float | None) -> str:
+        if mbps is None or mbps <= 0:
             return "未测速"
         return f"{mbps:.2f}Mbps"
 
@@ -146,7 +146,7 @@ class SubscriptionExporter:
             SubscriptionExporter.format_location(geo_code),
             SubscriptionExporter.format_network_labels(profile),
             SubscriptionExporter.format_type_labels(profile),
-            SubscriptionExporter.format_score(analyzed.total_score),
+            SubscriptionExporter.format_risk(profile.risk_score),
         ]
 
         if mode == "compact":
@@ -184,9 +184,10 @@ class SubscriptionExporter:
         ]
         indexed_nodes.sort(
             key=lambda item: (
-                -item[1].analyzed_node.total_score,
+                item[1].analyzed_node.probe.profile.risk_score is None,
+                item[1].analyzed_node.probe.profile.risk_score if item[1].analyzed_node.probe.profile.risk_score is not None else 101,
                 item[1].analyzed_node.probe.ttfb_ms,
-                -item[1].download_speed_mbps,
+                -(item[1].download_speed_mbps or 0),
                 item[0],
             )
         )

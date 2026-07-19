@@ -54,12 +54,12 @@ class ResultExporter:
             nodes,
             key=lambda n: (
                 n.analyzed_node.is_valid,
-                n.analyzed_node.total_score
+                -(n.analyzed_node.probe.profile.risk_score or 101)
             ),
             reverse=True
         )
         
-        headers = ["Status", "Remark", "Profile", "Actual IP", "Geo", "Ping(ms)", "TTFB(ms)", "Speed(Mbps)", "Detour", "Backbone", "Score", "Reject Reason"]
+        headers = ["Status", "Remark", "Profile", "Actual IP", "Geo", "Ping(ms)", "TTFB(ms)", "Speed(Mbps)", "Detour", "Backbone", "Risk", "Reject Reason"]
         rows = []
         
         for tn in sorted_nodes:
@@ -68,19 +68,19 @@ class ResultExporter:
             status = "✅" if an.is_valid else "❌"
             ping = f"{probe.tcp_ping_ms:.0f}"
             ttfb = f"{probe.ttfb_ms:.0f}"
-            score = f"{an.total_score:.1f}"
+            risk_display = "Unknown" if probe.profile.risk_score is None else f"{probe.profile.risk_score:.1f}"
             geo = str(probe.actual_geo)
             remark = str(an.node.remark)[:40]
             actual_ip = str(probe.actual_ip)
             profile = ResultExporter.format_profile_labels(probe.profile)
             
-            speed = f"{tn.download_speed_mbps:.2f}"
+            speed = "Not tested" if tn.download_speed_mbps is None else f"{tn.download_speed_mbps:.2f}"
             
             rows.append([
                 status, remark, profile, actual_ip, geo, ping, ttfb, speed,
                 "Yes" if probe.is_detour else "No",
                 "Yes" if probe.is_backbone else "No",
-                score, str(an.reject_reason)
+                risk_display, str(an.reject_reason)
             ])
             
         widths = [get_visual_width(h) for h in headers]
@@ -130,25 +130,15 @@ class ResultExporter:
 - **IPv6 Outbound Support**: `{"Yes" if probe.ipv6_support else "No"}`
 - **Actual IPv6 IP**: `{probe.actual_ipv6 or "N/A"}`
 
-### IP Intelligence
-- **IPWhoIs**: `{probe.ipwhois_info}`
-- **IPApi**: `{probe.ipapi_info}`
-- **Scamalytics**: `{probe.scamalytics_info}`
-- **proxycheck.io**: `{probe.proxycheck_info}`
-- **Abstract API**: `{probe.abstract_info}`
-- **IP2Location.io**: `{probe.ip2location_info}`
-
 ### Node Profile
 - **Labels**: `{ResultExporter.format_profile_labels(probe.profile)}`
-- **Risk Score**: `{probe.profile.risk_score:.1f}`
+- **Risk Score**: `{"Unknown" if probe.profile.risk_score is None else f"{probe.profile.risk_score:.1f}"}`
 - **Confidence**: `{probe.profile.confidence}`
 - **Evidence**: `{ResultExporter.format_profile_evidence(probe.profile)}`
 
-## 3. Analysis & Scoring
+## 3. Analysis
 - **Is Valid**: `{an.is_valid}`
 - **Reject Reason**: `{an.reject_reason or "None"}`
-- **Score Details**: `{an.score_details}`
-- **Total Score**: `{an.total_score:.2f}`
 
 ## 4. Route Trace
 - **Trace Path**: `{probe.trace_path}`
@@ -157,7 +147,7 @@ class ResultExporter:
 - **Backbone Info**: `{probe.backbone_info}`
 
 ## 5. Performance
-- **Download Speed**: `{tn.download_speed_mbps:.2f} Mbps`
+- **Download Speed**: `{"Not tested" if tn.download_speed_mbps is None else f"{tn.download_speed_mbps:.2f} Mbps"}`
 """
             with open(detail_path, "w", encoding="utf-8") as df:
                 df.write(detail_content)

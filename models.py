@@ -29,6 +29,8 @@ class LabelEvidence:
 @dataclass
 class ApiVerdict:
     source: str
+    site_id: str = ""
+    status: str = "success"
     network_labels: list[LabelEvidence] = field(default_factory=list)
     risk_labels: list[LabelEvidence] = field(default_factory=list)
     risk_score: float | None = None
@@ -39,7 +41,7 @@ class NodeProfile:
     display_labels: list[str] = field(default_factory=lambda: ["未知"])
     network_labels: list[LabelEvidence] = field(default_factory=list)
     risk_labels: list[LabelEvidence] = field(default_factory=list)
-    risk_score: float = 0.0
+    risk_score: float | None = None
     confidence: str = "low"
     evidence: list[ApiVerdict] = field(default_factory=list)
 
@@ -50,14 +52,6 @@ class ProbeData:
     actual_ip: str
     actual_geo: str
     asn_org: str
-    fraud_score: int
-    risk_tags: str = ""
-    ipwhois_info: str = ""
-    ipapi_info: str = ""
-    scamalytics_info: str = ""
-    proxycheck_info: str = ""
-    abstract_info: str = ""
-    ip2location_info: str = ""
     trace_path: str = ""
     is_detour: bool = False
     is_backbone: bool = False
@@ -71,13 +65,12 @@ class AnalyzedNode:
     node: VlessNode
     probe: ProbeData
     is_valid: bool
-    total_score: float
-    reject_reason: str
-    score_details: str = ""
+    reject_reason: str = ""
 
 @dataclass
 class TestedNode:
     __test__ = False
 
     analyzed_node: AnalyzedNode
-    download_speed_mbps: float
+    download_speed_mbps: float | None = None
+    speedtest_status: str = "not_tested"

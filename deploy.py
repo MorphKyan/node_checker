@@ -28,7 +28,7 @@ def create_archive(zip_filename="node_checker.zip"):
             # Prune directories starting with dot or in excluded list
             dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
             for file in files:
-                if file in exclude_files or file.endswith('.pyc') or file.endswith('.log') or file.endswith('.sqlite3'):
+                if file in exclude_files or file.endswith('.pyc') or file.endswith('.log'):
                     continue
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, '.')

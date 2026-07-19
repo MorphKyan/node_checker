@@ -1,17 +1,39 @@
+"""JSON-backed persistence for the local API service.
+
+The service intentionally uses one process per data directory.  Files are
+written atomically so an interrupted write never leaves a partially written
+configuration, job, result, or cache entry behind.
+"""
+from __future__ import annotations
+
+import json
 import os
-import sqlite3
 import threading
 import time
 import uuid
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
 
 from models import TestedNode
-from module_result_codec import tested_nodes_from_json, tested_nodes_to_json
+from module_result_codec import restore_tested_nodes
 from settings import settings
 
 
+DEFAULT_API_SITES = [
+    {"id": "ipwhois", "column_name": "ipwho.is", "provider": "ipwhois", "url_template": "https://ipwho.is/{ip}", "api_key": "", "weight": 1.0, "enabled": True, "order": 0},
+    {"id": "ipapi", "column_name": "ipapi.is", "provider": "ipapi", "url_template": "https://api.ipapi.is?q={ip}", "api_key": "", "weight": 1.0, "enabled": True, "order": 1},
+    {"id": "scamalytics", "column_name": "Scamalytics", "provider": "scamalytics", "url_template": "https://api11.scamalytics.com/v3/{ip}?key={key}", "api_key": "", "weight": 1.0, "enabled": False, "order": 2},
+    {"id": "proxycheck", "column_name": "proxycheck.io", "provider": "proxycheck", "url_template": "https://proxycheck.io/v3/{ip}", "api_key": "", "weight": 1.3, "enabled": True, "order": 3},
+    {"id": "abstract", "column_name": "Abstract API", "provider": "abstract", "url_template": "https://ip-intelligence.abstractapi.com/v1/?api_key={key}&ip_address={ip}", "api_key": "", "weight": 0.8, "enabled": False, "order": 4},
+    {"id": "ip2location", "column_name": "IP2Location.io", "provider": "ip2location", "url_template": "https://api.ip2location.io/?ip={ip}&format=json", "api_key": "", "weight": 0.6, "enabled": True, "order": 5},
+]
+
+
 class ApiStore:
-    _write_lock = threading.Lock()
-    _initialized_paths: set[str] = set()
+    _config_lock = threading.RLock()
+    _job_locks: dict[str, threading.RLock] = {}
+    _result_locks: dict[str, threading.RLock] = {}
 
     @staticmethod
     def now() -> int:
@@ -25,461 +47,290 @@ class ApiStore:
     def new_job_id() -> str:
         return f"job_{uuid.uuid4().hex[:12]}"
 
-    @classmethod
-    def db_path(cls) -> str:
-        return settings.API_DB_PATH
+    @staticmethod
+    def new_template_id() -> str:
+        return f"tpl_{uuid.uuid4().hex[:12]}"
 
     @classmethod
-    def default_singbox_template(cls) -> str:
-        template_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "examples",
-            "singbox_template.yaml",
-        )
-        with open(template_path, "r", encoding="utf-8") as template_file:
-            return template_file.read()
+    def data_dir(cls) -> Path:
+        return Path(settings.DATA_DIR)
 
     @classmethod
-    def connect(cls):
-        conn = sqlite3.connect(cls.db_path(), timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 30000")
-        return conn
+    def config_path(cls) -> Path:
+        return cls.data_dir() / "config.json"
+
+    @classmethod
+    def results_path(cls, subscription_id: str) -> Path:
+        return cls.data_dir() / "results" / f"{subscription_id}.json"
+
+    @classmethod
+    def jobs_path(cls, job_id: str) -> Path:
+        return cls.data_dir() / "jobs" / f"{job_id}.json"
+
+    @staticmethod
+    def _atomic_write(path: Path, value: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        with open(temp, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.replace(temp, path)
+        finally:
+            # A failed replacement must leave the previous file intact and
+            # must not accumulate abandoned temporary configuration files.
+            temp.unlink(missing_ok=True)
+
+    @staticmethod
+    def _read_json(path: Path, fallback: Any = None) -> Any:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return fallback
+
+    @classmethod
+    def _default_config(cls) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "runtime_settings": {key: getattr(settings, key) for key in __import__("module_runtime_settings").EDITABLE_SETTINGS},
+            "exit_ip_endpoint": "https://ipwho.is/",
+            "api_sites": deepcopy(DEFAULT_API_SITES),
+            "subscriptions": [],
+            "singbox_templates": [],
+        }
 
     @classmethod
     def init_db(cls) -> None:
-        db_path = cls.db_path()
-        if db_path in cls._initialized_paths:
-            return
+        """Compatibility name retained for callers; no database is created."""
+        with cls._config_lock:
+            cls.data_dir().mkdir(parents=True, exist_ok=True)
+            config = cls._read_json(cls.config_path())
+            if not isinstance(config, dict):
+                cls._atomic_write(cls.config_path(), cls._default_config())
+            else:
+                changed = False
+                defaults = cls._default_config()
+                for key, value in defaults.items():
+                    if key not in config:
+                        config[key] = value
+                        changed = True
+                if changed:
+                    cls._atomic_write(cls.config_path(), config)
 
-        db_dir = os.path.dirname(db_path)
-        if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
+    @classmethod
+    def _config(cls) -> dict[str, Any]:
+        cls.init_db()
+        config = cls._read_json(cls.config_path(), cls._default_config())
+        return config if isinstance(config, dict) else cls._default_config()
 
-        with cls._write_lock:
-            if db_path in cls._initialized_paths:
-                return
-            conn = cls.connect()
-            try:
-                conn.execute("PRAGMA journal_mode = WAL")
-                conn.executescript(
-                    """
-                    CREATE TABLE IF NOT EXISTS subscriptions (
-                        id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        url TEXT NOT NULL,
-                        created_at INTEGER NOT NULL,
-                        updated_at INTEGER NOT NULL,
-                        last_status TEXT NOT NULL DEFAULT 'new',
-                        last_job_id TEXT
-                    );
+    @classmethod
+    def _save_config(cls, config: dict[str, Any]) -> None:
+        cls._atomic_write(cls.config_path(), config)
 
-                    CREATE TABLE IF NOT EXISTS refresh_jobs (
-                        id TEXT PRIMARY KEY,
-                        subscription_id TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        phase TEXT NOT NULL DEFAULT 'queued',
-                        processed_nodes INTEGER NOT NULL DEFAULT 0,
-                        total_nodes INTEGER NOT NULL DEFAULT 0,
-                        error TEXT,
-                        speedtest_limit INTEGER NOT NULL,
-                        force_probe INTEGER NOT NULL DEFAULT 0,
-                        created_at INTEGER NOT NULL,
-                        started_at INTEGER,
-                        finished_at INTEGER,
-                        FOREIGN KEY(subscription_id) REFERENCES subscriptions(id)
-                    );
+    @classmethod
+    def default_singbox_template(cls) -> str:
+        path = Path(__file__).resolve().parent / "examples" / "singbox_template.yaml"
+        return path.read_text(encoding="utf-8")
 
-                    CREATE TABLE IF NOT EXISTS subscription_results (
-                        subscription_id TEXT PRIMARY KEY,
-                        result_json TEXT NOT NULL,
-                        node_count INTEGER NOT NULL,
-                        valid_count INTEGER NOT NULL,
-                        updated_at INTEGER NOT NULL,
-                        FOREIGN KEY(subscription_id) REFERENCES subscriptions(id)
-                    );
+    @classmethod
+    def get_runtime_settings(cls) -> dict[str, Any]:
+        return deepcopy(cls._config().get("runtime_settings", {}))
 
-                    CREATE TABLE IF NOT EXISTS singbox_templates (
-                        id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        created_at INTEGER NOT NULL,
-                        updated_at INTEGER NOT NULL
-                    );
-                    """
-                )
-                conn.commit()
+    @classmethod
+    def save_runtime_settings(cls, values: dict[str, Any]) -> None:
+        with cls._config_lock:
+            config = cls._config()
+            config["runtime_settings"] = deepcopy(values)
+            cls._save_config(config)
 
-                # Pre-populate with default template if table is empty
-                count = conn.execute("SELECT count(*) FROM singbox_templates").fetchone()[0]
-                if count == 0:
-                    tpl_id = f"tpl_{uuid.uuid4().hex[:12]}"
-                    default_content = """{
-  "experimental": {
-    "cache_file": {
-      "enabled": true,
-      "path": "/etc/sing-box/cache.db",
-      "store_fakeip": true
-    }
-  },
-  // 出站
-  "outbounds": [
-    // 手动选择国家或地区节点；根据“国家或地区出站”的名称对 `outbounds` 值进行增删改，须一一对应
-    { "tag": "🚀 节点选择", "type": "selector", "outbounds": [ "♻️ 自动选择", "👉 手动选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点", "🇺🇸 加州节点" ] },
-    // 选择`🎯 全球直连`为测试本地网络（运营商网络速度和 IPv6 支持情况），可选择其它节点用于测试机场节点速度和 IPv6 支持情况
-    { "tag": "📈 网络测试", "type": "selector", "outbounds": [ "🎯 全球直连", "🚀 节点选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点", "🇺🇸 加州节点" ] },
-    { "tag": "🕹️ 游戏平台", "type": "selector", "outbounds": [ "🎯 全球直连", "🚀 节点选择" ] },
-    { "tag": "🤖 AI 平台", "type": "selector", "outbounds": [ "🇺🇸 加州节点" ] },
-    { "tag": "🌍 国外媒体", "type": "selector", "outbounds": [ "🚀 节点选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点" ] },
-    { "tag": "🌎 国外域名", "type": "selector", "outbounds": [ "🚀 节点选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点" ] },
-    { "tag": "📲 电报消息", "type": "selector", "outbounds": [ "🚀 节点选择", "🇭🇰 香港节点", "🇹🇼 台湾节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇺🇸 美国节点" ] },
-    { "tag": "🐟 漏网之鱼", "type": "selector", "outbounds": [ "🎯 全球直连", "🚀 节点选择", "👉 手动选择" ] },
-    { "tag": "🎯 全球直连", "type": "selector", "outbounds": [ "DIRECT" ] },
-    { "tag": "DIRECT", "type": "direct" },
-    { "tag": "GLOBAL", "type": "selector", "outbounds": [ "🚀 节点选择", "DIRECT" ] },
-    
-    // -------------------- 国家或地区出站 --------------------
-    // 自动选择节点，即按照 url 测试结果使用延迟最低的节点；测试后容差大于 50ms 才会切换到延迟低的那个节点；筛选出“香港”节点，支持正则表达式
-    { "tag": "🇭🇰 香港节点", "type": "urltest", "include": "(?i)(🇭🇰|港|hk|hongkong|hong kong)" },
-    // 节点自动回退，默认选择第一个节点，节点超时后则会按代理顺序选择下一个可用节点，以此类推。也被叫做“故障转移”
-    { "tag": "🇹🇼 台湾节点", "type": "urltest", "use_all_nodes": true, "include": "(?i)(🇹🇼|台|tw|taiwan|tai wan)" },
-    // 节点负载均衡，即将请求均匀分配到多个节点上，优点是更稳定，速度可能有提升；将相同的目标地址请求分配给该出站内的同一个节点；推荐在节点复用比较多的情况下使用
-    { "tag": "🇯🇵 日本节点", "type": "urltest", "include": "(?i)(🇯🇵|日|jp|japan)" },
-    // 可使用 `"use_all_nodes": true` 代替，意思为引入所有出站节点
-    { "tag": "🇸🇬 新加坡节点", "type": "urltest", "use_all_nodes": true, "include": "(?i)(🇸🇬|新|sg|singapore)" },
-    { "tag": "🇺🇸 美国节点", "type": "urltest", "tolerance": 100, "include": "(?i)(🇺🇸|美|us|unitedstates|united states)" },
-    { "tag": "🇺🇸 加州节点", "type": "selector", "include": "(?i)(加州|加利福尼亚|California|CA)" },
-    { "tag": "♻️ 自动选择", "type": "urltest", "tolerance": 100, "use_all_nodes": true },
-    { "tag": "👉 手动选择", "type": "selector", "use_all_nodes": true }
-  ],
-  // 路由
-  "route": {
-    // 域名解析器，必须在 `dns.servers` 配置有 `dns_direct`
-    "default_domain_resolver": "dns_direct",
-    // 规则
-    "rules": [
-      // 若使用 ShellCrash，可进入 7 → 4 启用域名嗅探后删除此条 `action`
-      { "action": "sniff" },
-      // 若使用 ShellCrash，可进入 7 → 4 启用域名嗅探后删除此条 `action`
-      { "protocol": [ "dns" ], "action": "hijack-dns" },
-      // 若使用 ShellCrash，会自动覆写此条，可删除此条 `clash_mode`
-      { "clash_mode": "direct", "outbound": "DIRECT" },
-      // 若使用 ShellCrash，会自动覆写此条，可删除此条 `clash_mode`
-      { "clash_mode": "global", "outbound": "GLOBAL" },
-      // 自定义规则优先放前面
-      { "rule_set": [ "private" ], "outbound": "🎯 全球直连" },
-      { "rule_set": [ "ads" ], "action": "reject" },
-      { "rule_set": [ "games" ], "outbound": "🕹️ 游戏平台" },
-      { "rule_set": [ "media" ], "outbound": "🌍 国外媒体" },
-      { "rule_set": [ "ai" ], "outbound": "🤖 AI 平台" },
-      { "rule_set": [ "networktest" ], "outbound": "📈 网络测试" },
-      { "rule_set": [ "tld-proxy" ], "outbound": "🌎 国外域名" },
-      { "rule_set": [ "gfw" ], "outbound": "🌎 国外域名" },
-      { "rule_set": [ "telegramip" ], "outbound": "📲 电报消息" },
-      // 将目标域名解析成 IP 后与下方的 IP 规则进行匹配，提高兼容性
-      { "action": "resolve" },
-      { "rule_set": [ "mediaip" ], "outbound": "🌍 国外媒体" }
-    ],
-    // 规则集（binary 文件每天自动更新）
-    "rule_set": [
-      {
-        "tag": "ads",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/ads.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "private",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/private.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "games",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/games.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "media",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/media.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "ai",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/ai.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "networktest",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/networktest.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "tld-proxy",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/tld-proxy.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "gfw",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/gfw.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "telegramip",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/telegramip.srs",
-        "download_detour": "DIRECT"
-      },
-      {
-        "tag": "mediaip",
-        "type": "remote",
-        "format": "binary",
-        "url": "https://ghproxy.net/https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset-compatible/mediaip.srs",
-        "download_detour": "DIRECT"
-      }
-    ],
-    // 默认出站，即没有命中规则的域名或 IP 走该规则
-    "final": "🐟 漏网之鱼",
-    "auto_detect_interface": true
-  }
-}"""
-                    default_content = cls.default_singbox_template()
-                    conn.execute(
-                        """
-                        INSERT INTO singbox_templates (
-                            id, name, content, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (tpl_id, "默认模板", default_content, cls.now(), cls.now()),
-                    )
-                    conn.commit()
-                cls._initialized_paths.add(db_path)
-            finally:
-                conn.close()
+    @classmethod
+    def get_exit_ip_endpoint(cls) -> str:
+        return str(cls._config().get("exit_ip_endpoint") or "https://ipwho.is/")
+
+    @classmethod
+    def get_probe_config_snapshot(cls) -> dict[str, Any]:
+        """Capture every persisted input used by a probe in one config read."""
+        config = cls._config()
+        sites = sorted(config.get("api_sites", []), key=lambda s: (s.get("order", 0), s.get("id", "")))
+        return {
+            "api_sites": deepcopy(sites),
+            "exit_ip_endpoint": str(config.get("exit_ip_endpoint") or "https://ipwho.is/"),
+        }
+
+    @classmethod
+    def update_exit_ip_endpoint(cls, endpoint: str) -> str:
+        if not endpoint.startswith(("http://", "https://")):
+            raise ValueError("exit_ip_endpoint must be an HTTP(S) URL")
+        with cls._config_lock:
+            config = cls._config(); config["exit_ip_endpoint"] = endpoint; cls._save_config(config)
+        return endpoint
+
+    @classmethod
+    def _public_site(cls, site: dict[str, Any]) -> dict[str, Any]:
+        public = {k: v for k, v in site.items() if k != "api_key"}
+        public["api_key_configured"] = bool(site.get("api_key"))
+        return public
+
+    @classmethod
+    def get_api_sites(cls, *, public: bool = True) -> list[dict[str, Any]]:
+        sites = sorted(cls._config().get("api_sites", []), key=lambda s: (s.get("order", 0), s.get("id", "")))
+        return [cls._public_site(s) if public else deepcopy(s) for s in sites]
+
+    @staticmethod
+    def provider_types() -> list[str]:
+        return ["ipwhois", "ipapi", "scamalytics", "proxycheck", "abstract", "ip2location"]
+
+    @classmethod
+    def _validate_site(cls, data: dict[str, Any], *, existing: dict[str, Any] | None = None) -> dict[str, Any]:
+        site = deepcopy(existing or {})
+        site.update({k: v for k, v in data.items() if k not in {"clear_api_key", "api_key_configured"}})
+        site_id = str(site.get("id", "")).strip()
+        if not site_id or not site_id.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("site id must contain only letters, digits, '-' or '_'")
+        if site.get("provider") not in cls.provider_types():
+            raise ValueError("unsupported provider")
+        if not str(site.get("column_name", "")).strip():
+            raise ValueError("column_name is required")
+        template = str(site.get("url_template", ""))
+        if "{ip}" not in template or not template.startswith(("http://", "https://")):
+            raise ValueError("url_template must be an HTTP(S) URL containing {ip}")
+        try:
+            site["weight"] = float(site.get("weight", 1.0))
+        except (TypeError, ValueError):
+            raise ValueError("weight must be a number")
+        if site["weight"] <= 0:
+            raise ValueError("weight must be greater than zero")
+        site["enabled"] = bool(site.get("enabled", False))
+        if site["enabled"] and "{key}" in template and not str(site.get("api_key", "")):
+            raise ValueError("an API key is required before enabling this site")
+        site["id"] = site_id
+        site["column_name"] = str(site["column_name"]).strip()
+        return site
+
+    @classmethod
+    def create_api_site(cls, data: dict[str, Any]) -> dict[str, Any]:
+        with cls._config_lock:
+            config = cls._config(); sites = config["api_sites"]
+            if any(s.get("id") == data.get("id") for s in sites):
+                raise ValueError("site id already exists")
+            site = cls._validate_site(data)
+            site["order"] = len(sites)
+            site["api_key"] = str(data.get("api_key") or "")
+            sites.append(site); cls._save_config(config)
+            return cls._public_site(site)
+
+    @classmethod
+    def update_api_site(cls, site_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        with cls._config_lock:
+            config = cls._config()
+            for index, old in enumerate(config["api_sites"]):
+                if old.get("id") != site_id: continue
+                if "id" in data and data["id"] != site_id:
+                    raise ValueError("site id cannot be changed")
+                # Apply key semantics before validation: an enabled `{key}`
+                # template must be validated against the final stored key.
+                candidate = deepcopy(old)
+                candidate.update({k: v for k, v in data.items() if k not in {"clear_api_key", "api_key_configured", "id", "api_key"}})
+                if data.get("clear_api_key"):
+                    candidate["api_key"] = ""
+                elif "api_key" in data and data["api_key"]:
+                    candidate["api_key"] = str(data["api_key"])
+                site = cls._validate_site(candidate, existing=None)
+                config["api_sites"][index] = site; cls._save_config(config)
+                return cls._public_site(site)
+        return None
+
+    @classmethod
+    def delete_api_site(cls, site_id: str) -> bool:
+        with cls._config_lock:
+            config = cls._config(); sites = config["api_sites"]
+            kept = [s for s in sites if s.get("id") != site_id]
+            if len(kept) == len(sites): return False
+            for index, site in enumerate(kept): site["order"] = index
+            config["api_sites"] = kept; cls._save_config(config); return True
+
+    @classmethod
+    def order_api_sites(cls, ordered_ids: list[str]) -> list[dict[str, Any]]:
+        with cls._config_lock:
+            config = cls._config(); sites = config["api_sites"]
+            ids = [s.get("id") for s in sites]
+            if set(ids) != set(ordered_ids) or len(ids) != len(ordered_ids):
+                raise ValueError("order must include every site exactly once")
+            mapping = {s["id"]: s for s in sites}
+            config["api_sites"] = [mapping[id_] for id_ in ordered_ids]
+            for index, site in enumerate(config["api_sites"]): site["order"] = index
+            cls._save_config(config)
+            return cls.get_api_sites()
 
     @classmethod
     def create_subscription(cls, url: str, name: str | None = None) -> dict:
-        cls.init_db()
-        sub_id = cls.new_subscription_id()
-        now = cls.now()
-        final_name = name or sub_id
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO subscriptions (
-                        id, name, url, created_at, updated_at, last_status, last_job_id
-                    ) VALUES (?, ?, ?, ?, ?, 'new', NULL)
-                    """,
-                    (sub_id, final_name, url, now, now),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        return cls.get_subscription(sub_id)
+        with cls._config_lock:
+            config = cls._config(); now = cls.now(); sub_id = cls.new_subscription_id()
+            sub = {"id": sub_id, "name": name or f"Subscription {sub_id[-6:]}", "url": url, "created_at": now, "updated_at": now, "last_status": "new", "last_job_id": None}
+            config["subscriptions"].append(sub); cls._save_config(config); return deepcopy(sub)
 
     @classmethod
     def get_subscription(cls, subscription_id: str) -> dict | None:
-        cls.init_db()
-        conn = cls.connect()
-        try:
-            row = conn.execute(
-                "SELECT * FROM subscriptions WHERE id = ?",
-                (subscription_id,),
-            ).fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
+        for sub in cls._config().get("subscriptions", []):
+            if sub.get("id") == subscription_id: return deepcopy(sub)
+        return None
 
     @classmethod
-    def update_subscription(
-        cls,
-        subscription_id: str,
-        *,
-        name: str | None = None,
-        url: str | None = None,
-    ) -> dict | None:
-        cls.init_db()
-        existing = cls.get_subscription(subscription_id)
-        if not existing:
-            return None
-        url_changed = url is not None and url != existing["url"]
-        updates = []
-        values = []
-        if name is not None:
-            updates.append("name = ?")
-            values.append(name)
-        if url is not None:
-            updates.append("url = ?")
-            values.append(url)
-        if not updates:
-            return cls.get_subscription(subscription_id)
-
-        now = cls.now()
-        if url_changed:
-            updates.append("last_status = 'new'")
-            updates.append("last_job_id = NULL")
-        updates.append("updated_at = ?")
-        values.append(now)
-        values.append(subscription_id)
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                conn.execute(
-                    f"UPDATE subscriptions SET {', '.join(updates)} WHERE id = ?",
-                    values,
-                )
+    def update_subscription(cls, subscription_id: str, *, name: str | None = None, url: str | None = None) -> dict | None:
+        with cls._config_lock:
+            config = cls._config()
+            for sub in config["subscriptions"]:
+                if sub.get("id") != subscription_id: continue
+                url_changed = url is not None and url != sub.get("url")
+                if name is not None: sub["name"] = name
+                if url is not None: sub["url"] = url
+                sub["updated_at"] = cls.now()
                 if url_changed:
-                    conn.execute(
-                        "DELETE FROM subscription_results WHERE subscription_id = ?",
-                        (subscription_id,),
-                    )
-                    conn.execute(
-                        """
-                        UPDATE refresh_jobs
-                        SET status = 'failed',
-                            phase = 'failed',
-                            error = ?,
-                            finished_at = ?
-                        WHERE subscription_id = ?
-                          AND status IN ('queued', 'running')
-                        """,
-                        (
-                            "Subscription URL changed before refresh completed",
-                            now,
-                            subscription_id,
-                        ),
-                    )
-                conn.commit()
-            finally:
-                conn.close()
-        return cls.get_subscription(subscription_id)
-
-    @classmethod
-    def fail_stale_active_jobs(cls, reason: str) -> int:
-        cls.init_db()
-        now = cls.now()
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                rows = conn.execute(
-                    """
-                    SELECT id, subscription_id
-                    FROM refresh_jobs
-                    WHERE status IN ('queued', 'running')
-                    """
-                ).fetchall()
-                if not rows:
-                    return 0
-
-                conn.execute(
-                    """
-                    UPDATE refresh_jobs
-                    SET status = 'failed',
-                        phase = 'failed',
-                        error = ?,
-                        finished_at = ?
-                    WHERE status IN ('queued', 'running')
-                    """,
-                    (reason, now),
-                )
-                for row in rows:
-                    conn.execute(
-                        """
-                        UPDATE subscriptions
-                        SET last_status = 'failed', updated_at = ?
-                        WHERE id = ? AND last_job_id = ?
-                        """,
-                        (now, row["subscription_id"], row["id"]),
-                    )
-                conn.commit()
-                return len(rows)
-            finally:
-                conn.close()
+                    sub.update(last_status="new", last_job_id=None)
+                    cls.results_path(subscription_id).unlink(missing_ok=True)
+                    for path in (cls.data_dir() / "jobs").glob("*.json"):
+                        job = cls._read_json(path, {})
+                        if job.get("subscription_id") == subscription_id and job.get("status") in {"queued", "running"}:
+                            job.update(status="failed", phase="failed", error="Subscription URL changed before refresh completed", finished_at=cls.now())
+                            cls._atomic_write(path, job)
+                cls._save_config(config); return deepcopy(sub)
+        return None
 
     @classmethod
     def delete_subscription(cls, subscription_id: str) -> bool:
-        cls.init_db()
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                existing = conn.execute(
-                    "SELECT id FROM subscriptions WHERE id = ?",
-                    (subscription_id,),
-                ).fetchone()
-                if not existing:
-                    return False
-                conn.execute(
-                    "DELETE FROM subscription_results WHERE subscription_id = ?",
-                    (subscription_id,),
-                )
-                conn.execute(
-                    "DELETE FROM refresh_jobs WHERE subscription_id = ?",
-                    (subscription_id,),
-                )
-                conn.execute(
-                    "DELETE FROM subscriptions WHERE id = ?",
-                    (subscription_id,),
-                )
-                conn.commit()
-                return True
-            finally:
-                conn.close()
+        with cls._config_lock:
+            config = cls._config(); old = config["subscriptions"]
+            config["subscriptions"] = [s for s in old if s.get("id") != subscription_id]
+            if len(old) == len(config["subscriptions"]): return False
+            cls.results_path(subscription_id).unlink(missing_ok=True)
+            for path in (cls.data_dir() / "jobs").glob("*.json"):
+                job = cls._read_json(path, {})
+                if job.get("subscription_id") == subscription_id: path.unlink(missing_ok=True)
+            cls._save_config(config); return True
 
     @classmethod
     def list_subscriptions(cls) -> list[dict]:
-        cls.init_db()
-        conn = cls.connect()
-        try:
-            rows = conn.execute(
-                """
-                SELECT
-                    s.id, s.name, s.url, s.last_status, s.updated_at, s.last_job_id,
-                    COALESCE(r.node_count, 0) AS node_count,
-                    COALESCE(r.valid_count, 0) AS valid_count
-                FROM subscriptions s
-                LEFT JOIN subscription_results r ON r.subscription_id = s.id
-                ORDER BY s.created_at DESC
-                """
-            ).fetchall()
-            return [dict(row) for row in rows]
-        finally:
-            conn.close()
+        rows = []
+        for sub in sorted(cls._config().get("subscriptions", []), key=lambda s: s.get("created_at", 0), reverse=True):
+            result = cls.get_latest_result(sub["id"])
+            rows.append({**deepcopy(sub), "node_count": result["node_count"] if result else 0, "valid_count": result["valid_count"] if result else 0})
+        return rows
+
+    @classmethod
+    def _job_lock(cls, job_id: str) -> threading.RLock:
+        with cls._config_lock: return cls._job_locks.setdefault(job_id, threading.RLock())
+
+    @classmethod
+    def _result_lock(cls, subscription_id: str) -> threading.RLock:
+        with cls._config_lock: return cls._result_locks.setdefault(subscription_id, threading.RLock())
 
     @classmethod
     def find_active_job(cls, subscription_id: str) -> dict | None:
-        cls.init_db()
-        conn = cls.connect()
-        try:
-            row = conn.execute(
-                """
-                SELECT * FROM refresh_jobs
-                WHERE subscription_id = ? AND status IN ('queued', 'running')
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                (subscription_id,),
-            ).fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
+        jobs = [cls._read_json(p, {}) for p in (cls.data_dir() / "jobs").glob("*.json")]
+        active = [j for j in jobs if j.get("subscription_id") == subscription_id and j.get("status") in {"queued", "running"}]
+        return deepcopy(max(active, key=lambda j: j.get("created_at", 0))) if active else None
 
     @classmethod
     def create_refresh_job(
@@ -487,385 +338,118 @@ class ApiStore:
         subscription_id: str,
         speedtest_limit: int,
         force_probe: bool = False,
+        api_sites_snapshot: list[dict] | None = None,
+        exit_ip_endpoint_snapshot: str | None = None,
+        probe_config_snapshot: dict[str, Any] | None = None,
     ) -> dict:
-        cls.init_db()
-        job_id = cls.new_job_id()
-        now = cls.now()
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO refresh_jobs (
-                        id, subscription_id, status, phase, speedtest_limit,
-                        force_probe, created_at
-                    ) VALUES (?, ?, 'queued', 'queued', ?, ?, ?)
-                    """,
-                    (job_id, subscription_id, speedtest_limit, int(force_probe), now),
-                )
-                conn.execute(
-                    """
-                    UPDATE subscriptions
-                    SET last_status = 'queued', last_job_id = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (job_id, now, subscription_id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        return cls.get_job(job_id)
+        with cls._config_lock:
+            if not cls.get_subscription(subscription_id): raise KeyError(subscription_id)
+            config_snapshot = deepcopy(probe_config_snapshot) if probe_config_snapshot is not None else cls.get_probe_config_snapshot()
+            if api_sites_snapshot is not None:
+                config_snapshot["api_sites"] = deepcopy(api_sites_snapshot)
+            if exit_ip_endpoint_snapshot is not None:
+                config_snapshot["exit_ip_endpoint"] = str(exit_ip_endpoint_snapshot)
+            config_snapshot.setdefault("api_sites", [])
+            config_snapshot.setdefault("exit_ip_endpoint", "https://ipwho.is/")
+            now = cls.now(); job_id = cls.new_job_id()
+            job = {"id": job_id, "subscription_id": subscription_id, "status": "queued", "phase": "queued", "processed_nodes": 0, "total_nodes": 0, "error": None, "speedtest_limit": int(speedtest_limit), "force_probe": bool(force_probe), "created_at": now, "started_at": None, "finished_at": None, "probe_config_snapshot": config_snapshot, "api_sites_snapshot": deepcopy(config_snapshot["api_sites"]), "exit_ip_endpoint_snapshot": config_snapshot["exit_ip_endpoint"]}
+            cls._atomic_write(cls.jobs_path(job_id), job)
+            config = cls._config()
+            for sub in config["subscriptions"]:
+                if sub["id"] == subscription_id: sub.update(last_status="queued", last_job_id=job_id, updated_at=now)
+            cls._save_config(config); return deepcopy(job)
 
     @classmethod
     def get_job(cls, job_id: str) -> dict | None:
-        cls.init_db()
-        conn = cls.connect()
-        try:
-            row = conn.execute(
-                "SELECT * FROM refresh_jobs WHERE id = ?",
-                (job_id,),
-            ).fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
+        job = cls._read_json(cls.jobs_path(job_id))
+        return deepcopy(job) if isinstance(job, dict) else None
 
     @classmethod
-    def update_job(
-        cls,
-        job_id: str,
-        *,
-        status: str | None = None,
-        phase: str | None = None,
-        processed_nodes: int | None = None,
-        total_nodes: int | None = None,
-        error: str | None = None,
-        started_at: int | None = None,
-        finished_at: int | None = None,
-    ) -> None:
-        cls.init_db()
-        updates = []
-        values = []
-        for field, value in (
-            ("status", status),
-            ("phase", phase),
-            ("processed_nodes", processed_nodes),
-            ("total_nodes", total_nodes),
-            ("error", error),
-            ("started_at", started_at),
-            ("finished_at", finished_at),
-        ):
-            if value is not None:
-                updates.append(f"{field} = ?")
-                values.append(value)
-        if not updates:
-            return
-
-        values.append(job_id)
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                conn.execute(
-                    f"UPDATE refresh_jobs SET {', '.join(updates)} WHERE id = ?",
-                    values,
-                )
-                job = conn.execute(
-                    "SELECT * FROM refresh_jobs WHERE id = ?",
-                    (job_id,),
-                ).fetchone()
-                if job and status is not None:
-                    conn.execute(
-                        """
-                        UPDATE subscriptions
-                        SET last_status = ?, updated_at = ?
-                        WHERE id = ? AND last_job_id = ?
-                        """,
-                        (status, cls.now(), job["subscription_id"], job["id"]),
-                    )
-                conn.commit()
-            finally:
-                conn.close()
+    def update_job(cls, job_id: str, **updates: Any) -> None:
+        with cls._job_lock(job_id):
+            job = cls._read_json(cls.jobs_path(job_id))
+            if not isinstance(job, dict): return
+            for key, value in updates.items():
+                if value is not None: job[key] = value
+            cls._atomic_write(cls.jobs_path(job_id), job)
+            if updates.get("status") is not None:
+                with cls._config_lock:
+                    config = cls._config()
+                    for sub in config["subscriptions"]:
+                        if sub["id"] == job["subscription_id"] and sub.get("last_job_id") == job_id:
+                            sub.update(last_status=job["status"], updated_at=cls.now())
+                    cls._save_config(config)
 
     @classmethod
     def cancel_job(cls, job_id: str, reason: str = "Canceled by user") -> dict | None:
-        cls.init_db()
-        now = cls.now()
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                job = conn.execute(
-                    "SELECT id, subscription_id, status FROM refresh_jobs WHERE id = ?",
-                    (job_id,),
-                ).fetchone()
-                if not job:
-                    return None
-                if job["status"] not in {"queued", "running"}:
-                    return dict(job)
-
-                conn.execute(
-                    """
-                    UPDATE refresh_jobs
-                    SET status = 'canceled',
-                        phase = 'canceled',
-                        error = ?,
-                        finished_at = ?
-                    WHERE id = ?
-                    """,
-                    (reason, now, job_id),
-                )
-                conn.execute(
-                    """
-                    UPDATE subscriptions
-                    SET last_status = 'canceled', updated_at = ?
-                    WHERE id = ? AND last_job_id = ?
-                    """,
-                    (now, job["subscription_id"], job_id),
-                )
-                conn.commit()
-                return cls.get_job(job_id)
-            finally:
-                conn.close()
+        job = cls.get_job(job_id)
+        if not job: return None
+        if job.get("status") in {"queued", "running"}:
+            cls.update_job(job_id, status="canceled", phase="canceled", error=reason, finished_at=cls.now())
+        return cls.get_job(job_id)
 
     @classmethod
-    def save_results(cls, subscription_id: str, nodes: list[TestedNode]) -> None:
-        cls.init_db()
-        payload = tested_nodes_to_json(nodes)
-        node_count = len(nodes)
-        valid_count = sum(1 for node in nodes if node.analyzed_node.is_valid)
-        now = cls.now()
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO subscription_results (
-                        subscription_id, result_json, node_count, valid_count, updated_at
-                    ) VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(subscription_id) DO UPDATE SET
-                        result_json = excluded.result_json,
-                        node_count = excluded.node_count,
-                        valid_count = excluded.valid_count,
-                        updated_at = excluded.updated_at
-                    """,
-                    (subscription_id, payload, node_count, valid_count, now),
-                )
-                conn.execute(
-                    """
-                    UPDATE subscriptions
-                    SET updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (now, subscription_id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
+    def fail_stale_active_jobs(cls, reason: str) -> int:
+        count = 0
+        for path in (cls.data_dir() / "jobs").glob("*.json"):
+            job = cls._read_json(path, {})
+            if job.get("status") in {"queued", "running"}:
+                cls.update_job(job["id"], status="failed", phase="failed", error=reason, finished_at=cls.now()); count += 1
+        return count
 
     @classmethod
-    def save_results_if_current(
-        cls,
-        subscription_id: str,
-        job_id: str,
-        expected_url: str,
-        nodes: list[TestedNode],
-    ) -> bool:
-        cls.init_db()
-        payload = tested_nodes_to_json(nodes)
-        node_count = len(nodes)
-        valid_count = sum(1 for node in nodes if node.analyzed_node.is_valid)
+    def _result_payload(cls, subscription_id: str, nodes: list[TestedNode], api_sites_snapshot: list[dict] | None = None, exit_ip_endpoint_snapshot: str | None = None) -> dict:
         now = cls.now()
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                subscription = conn.execute(
-                    """
-                    SELECT id, url, last_job_id
-                    FROM subscriptions
-                    WHERE id = ?
-                    """,
-                    (subscription_id,),
-                ).fetchone()
-                job = conn.execute(
-                    """
-                    SELECT id, status
-                    FROM refresh_jobs
-                    WHERE id = ? AND subscription_id = ?
-                    """,
-                    (job_id, subscription_id),
-                ).fetchone()
-                if (
-                    not subscription
-                    or not job
-                    or subscription["url"] != expected_url
-                    or subscription["last_job_id"] != job_id
-                    or job["status"] != "running"
-                ):
-                    return False
+        return {"subscription_id": subscription_id, "nodes": [__import__("dataclasses").asdict(n) for n in nodes], "node_count": len(nodes), "valid_count": sum(n.analyzed_node.is_valid for n in nodes), "updated_at": now, "api_sites_snapshot": [cls._public_site(s) for s in (api_sites_snapshot or [])], "exit_ip_endpoint_snapshot": exit_ip_endpoint_snapshot}
 
-                conn.execute(
-                    """
-                    INSERT INTO subscription_results (
-                        subscription_id, result_json, node_count, valid_count, updated_at
-                    ) VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(subscription_id) DO UPDATE SET
-                        result_json = excluded.result_json,
-                        node_count = excluded.node_count,
-                        valid_count = excluded.valid_count,
-                        updated_at = excluded.updated_at
-                    """,
-                    (subscription_id, payload, node_count, valid_count, now),
-                )
-                conn.execute(
-                    """
-                    UPDATE refresh_jobs
-                    SET status = 'completed',
-                        phase = 'completed',
-                        processed_nodes = ?,
-                        total_nodes = ?,
-                        finished_at = ?
-                    WHERE id = ?
-                    """,
-                    (node_count, node_count, now, job_id),
-                )
-                conn.execute(
-                    """
-                    UPDATE subscriptions
-                    SET last_status = 'completed', updated_at = ?
-                    WHERE id = ? AND last_job_id = ?
-                    """,
-                    (now, subscription_id, job_id),
-                )
-                conn.commit()
-                return True
-            finally:
-                conn.close()
+    @classmethod
+    def save_results(cls, subscription_id: str, nodes: list[TestedNode], api_sites_snapshot: list[dict] | None = None) -> None:
+        with cls._result_lock(subscription_id): cls._atomic_write(cls.results_path(subscription_id), cls._result_payload(subscription_id, nodes, api_sites_snapshot))
+
+    @classmethod
+    def save_results_if_current(cls, subscription_id: str, job_id: str, expected_url: str, nodes: list[TestedNode]) -> bool:
+        with cls._result_lock(subscription_id):
+            sub = cls.get_subscription(subscription_id); job = cls.get_job(job_id)
+            if not sub or not job or sub.get("url") != expected_url or sub.get("last_job_id") != job_id or job.get("status") != "running": return False
+            cls._atomic_write(cls.results_path(subscription_id), cls._result_payload(subscription_id, nodes, job.get("api_sites_snapshot", []), job.get("exit_ip_endpoint_snapshot")))
+            cls.update_job(job_id, status="completed", phase="completed", processed_nodes=len(nodes), total_nodes=len(nodes), finished_at=cls.now())
+            return True
 
     @classmethod
     def get_latest_result(cls, subscription_id: str) -> dict | None:
-        cls.init_db()
-        conn = cls.connect()
-        try:
-            row = conn.execute(
-                """
-                SELECT subscription_id, result_json, node_count, valid_count, updated_at
-                FROM subscription_results
-                WHERE subscription_id = ?
-                """,
-                (subscription_id,),
-            ).fetchone()
-            if not row:
-                return None
-            data = dict(row)
-            data["nodes"] = tested_nodes_from_json(data.pop("result_json"))
-            return data
-        finally:
-            conn.close()
-
-    @staticmethod
-    def new_template_id() -> str:
-        return f"tpl_{uuid.uuid4().hex[:12]}"
+        data = cls._read_json(cls.results_path(subscription_id))
+        if not isinstance(data, dict): return None
+        try: data["nodes"] = restore_tested_nodes(data.get("nodes", []))
+        except (TypeError, ValueError, KeyError): return None
+        return data
 
     @classmethod
     def list_singbox_templates(cls) -> list[dict]:
-        cls.init_db()
-        conn = cls.connect()
-        try:
-            rows = conn.execute(
-                "SELECT * FROM singbox_templates ORDER BY created_at DESC"
-            ).fetchall()
-            return [dict(row) for row in rows]
-        finally:
-            conn.close()
+        return sorted(deepcopy(cls._config().get("singbox_templates", [])), key=lambda t: t.get("created_at", 0), reverse=True)
 
     @classmethod
     def get_singbox_template(cls, template_id: str) -> dict | None:
-        cls.init_db()
-        conn = cls.connect()
-        try:
-            row = conn.execute(
-                "SELECT * FROM singbox_templates WHERE id = ?",
-                (template_id,),
-            ).fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
+        return next((t for t in cls.list_singbox_templates() if t.get("id") == template_id), None)
 
     @classmethod
     def create_singbox_template(cls, name: str, content: str) -> dict:
-        cls.init_db()
-        tpl_id = cls.new_template_id()
-        now = cls.now()
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO singbox_templates (
-                        id, name, content, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (tpl_id, name, content, now, now),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        return cls.get_singbox_template(tpl_id)
+        with cls._config_lock:
+            config = cls._config(); now = cls.now(); tpl = {"id": cls.new_template_id(), "name": name, "content": content, "created_at": now, "updated_at": now}; config["singbox_templates"].append(tpl); cls._save_config(config); return deepcopy(tpl)
 
     @classmethod
-    def update_singbox_template(
-        cls,
-        template_id: str,
-        *,
-        name: str | None = None,
-        content: str | None = None,
-    ) -> dict | None:
-        cls.init_db()
-        existing = cls.get_singbox_template(template_id)
-        if not existing:
-            return None
-        updates = []
-        values = []
-        if name is not None:
-            updates.append("name = ?")
-            values.append(name)
-        if content is not None:
-            updates.append("content = ?")
-            values.append(content)
-        if not updates:
-            return existing
-
-        now = cls.now()
-        updates.append("updated_at = ?")
-        values.append(now)
-        values.append(template_id)
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                conn.execute(
-                    f"UPDATE singbox_templates SET {', '.join(updates)} WHERE id = ?",
-                    values,
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        return cls.get_singbox_template(template_id)
+    def update_singbox_template(cls, template_id: str, *, name: str | None = None, content: str | None = None) -> dict | None:
+        with cls._config_lock:
+            config = cls._config()
+            for tpl in config["singbox_templates"]:
+                if tpl["id"] == template_id:
+                    if name is not None: tpl["name"] = name
+                    if content is not None: tpl["content"] = content
+                    tpl["updated_at"] = cls.now(); cls._save_config(config); return deepcopy(tpl)
+        return None
 
     @classmethod
     def delete_singbox_template(cls, template_id: str) -> bool:
-        cls.init_db()
-        with cls._write_lock:
-            conn = cls.connect()
-            try:
-                existing = conn.execute(
-                    "SELECT id FROM singbox_templates WHERE id = ?",
-                    (template_id,),
-                ).fetchone()
-                if not existing:
-                    return False
-                conn.execute(
-                    "DELETE FROM singbox_templates WHERE id = ?",
-                    (template_id,),
-                )
-                conn.commit()
-                return True
-            finally:
-                conn.close()
+        with cls._config_lock:
+            config = cls._config(); old = config["singbox_templates"]; config["singbox_templates"] = [t for t in old if t["id"] != template_id]
+            if len(old) == len(config["singbox_templates"]): return False
+            cls._save_config(config); return True

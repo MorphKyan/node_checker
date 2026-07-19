@@ -7,6 +7,9 @@ import type {
   SubscriptionResults,
   SubscriptionSummary,
   SingboxTemplate,
+  ApiSite,
+  ApiSiteInput,
+  ApiSitesConfig,
 } from "./types";
 
 export class ApiError extends Error {
@@ -50,18 +53,25 @@ export interface ApiClient {
   getJob(id: string): Promise<JobStatus>;
   cancelJob(id: string): Promise<JobStatus>;
   getResults(id: string): Promise<SubscriptionResults>;
-  getEnhanced(id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number }): Promise<string>;
+  getEnhanced(id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number; max_risk?: number }): Promise<string>;
   getSettings(): Promise<RuntimeSettings>;
   getSettingsMetadata(): Promise<RuntimeSettingsMetadata>;
   updateSettings(input: Partial<RuntimeSettings>): Promise<RuntimeSettings>;
+  getApiSites(): Promise<ApiSitesConfig>;
+  getApiSiteProviders(): Promise<string[]>;
+  createApiSite(input: ApiSiteInput): Promise<ApiSite>;
+  updateApiSite(id: string, input: Partial<ApiSiteInput>): Promise<ApiSite>;
+  deleteApiSite(id: string): Promise<{ deleted: boolean; id: string }>;
+  orderApiSites(ids: string[]): Promise<ApiSite[]>;
+  updateExitIpEndpoint(exit_ip_endpoint: string): Promise<{ exit_ip_endpoint: string }>;
 
   listSingboxTemplates(): Promise<SingboxTemplate[]>;
   getSingboxTemplate(id: string): Promise<SingboxTemplate>;
   createSingboxTemplate(input: { name: string; content: string }): Promise<SingboxTemplate>;
   updateSingboxTemplate(id: string, input: { name?: string; content?: string }): Promise<SingboxTemplate>;
   deleteSingboxTemplate(id: string): Promise<{ deleted: boolean; template_id: string }>;
-  getSingboxExport(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; min_score?: number }): Promise<string>;
-  getSingboxExportUrl(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; min_score?: number }): string;
+  getSingboxExport(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }): Promise<string>;
+  getSingboxExportUrl(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }): string;
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -139,6 +149,13 @@ export function createApiClient(baseUrl: string): ApiClient {
         method: "PATCH",
         body: JSON.stringify(input),
       }),
+    getApiSites: () => request(baseUrl, "/api-sites"),
+    getApiSiteProviders: () => request(baseUrl, "/api-sites/providers"),
+    createApiSite: (input) => request(baseUrl, "/api-sites", { method: "POST", body: JSON.stringify(input) }),
+    updateApiSite: (id, input) => request(baseUrl, `/api-sites/${pathSegment(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
+    deleteApiSite: (id) => request(baseUrl, `/api-sites/${pathSegment(id)}`, { method: "DELETE" }),
+    orderApiSites: (ids) => request(baseUrl, "/api-sites/order", { method: "PUT", body: JSON.stringify({ ids }) }),
+    updateExitIpEndpoint: (exit_ip_endpoint) => request(baseUrl, "/exit-ip-endpoint", { method: "PATCH", body: JSON.stringify({ exit_ip_endpoint }) }),
 
     listSingboxTemplates: () => request(baseUrl, "/singbox/templates"),
     getSingboxTemplate: (id) => request(baseUrl, `/singbox/templates/${pathSegment(id)}`),
@@ -163,7 +180,7 @@ export function createApiClient(baseUrl: string): ApiClient {
       if (params?.mode) query.append("mode", params.mode);
       if (params?.valid_only !== undefined) query.append("valid_only", String(params.valid_only));
       if (params?.limit !== undefined) query.append("limit", String(params.limit));
-      if (params?.min_score !== undefined) query.append("min_score", String(params.min_score));
+      if (params?.max_risk !== undefined) query.append("max_risk", String(params.max_risk));
       return request(baseUrl, `/subscriptions/singbox?${query.toString()}`);
     },
     getSingboxExportUrl: (subscriptionIds, templateId, params) => {
@@ -172,7 +189,7 @@ export function createApiClient(baseUrl: string): ApiClient {
   };
 }
 
-function enhancedPath(id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number }): string {
+function enhancedPath(id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number; max_risk?: number }): string {
   const query = new URLSearchParams();
   const ids = Array.isArray(id) ? id : [id];
   ids.forEach((subscriptionId) => query.append("subscription_id", subscriptionId));
@@ -180,10 +197,11 @@ function enhancedPath(id: string | string[], params: { mode: ExportMode; format:
   query.append("format", params.format);
   query.append("valid_only", String(params.valid_only));
   if (params.limit !== undefined) query.append("limit", String(params.limit));
+  if (params.max_risk !== undefined) query.append("max_risk", String(params.max_risk));
   return `/subscriptions/enhanced?${query.toString()}`;
 }
 
-export function enhancedUrl(baseUrl: string, id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number }): string {
+export function enhancedUrl(baseUrl: string, id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number; max_risk?: number }): string {
   return joinUrl(baseUrl, enhancedPath(id, params));
 }
 
@@ -191,7 +209,7 @@ export function singboxUrl(
   baseUrl: string,
   subscriptionIds: string[],
   templateId?: string,
-  params?: { mode?: string; valid_only?: boolean; limit?: number; min_score?: number }
+  params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }
 ): string {
   const query = new URLSearchParams();
   subscriptionIds.forEach((id) => query.append("subscription_id", id));
@@ -199,6 +217,6 @@ export function singboxUrl(
   if (params?.mode) query.append("mode", params.mode);
   if (params?.valid_only !== undefined) query.append("valid_only", String(params.valid_only));
   if (params?.limit !== undefined) query.append("limit", String(params.limit));
-  if (params?.min_score !== undefined) query.append("min_score", String(params.min_score));
+  if (params?.max_risk !== undefined) query.append("max_risk", String(params.max_risk));
   return joinUrl(baseUrl, `/subscriptions/singbox?${query.toString()}`);
 }

@@ -23,6 +23,11 @@ class SubscriptionRefreshService:
     _running_tasks: dict[str, asyncio.Task] = {}
 
     @staticmethod
+    def freeze_probe_config(probe_config: dict | None = None, api_sites: list[dict] | None = None) -> dict:
+        """Return the one probe configuration every node in this batch shares."""
+        return ProbeCache.probe_config_snapshot(probe_config, api_sites)
+
+    @staticmethod
     def select_speedtest_nodes_per_region(
         analyzed_nodes: list[AnalyzedNode],
         speedtest_limit: int,
@@ -41,12 +46,12 @@ class SubscriptionRefreshService:
         nodes_to_test: list[AnalyzedNode] = []
         nodes_to_skip: list[AnalyzedNode] = []
         for region_nodes in nodes_by_region.values():
-            region_nodes.sort(key=lambda node: node.total_score, reverse=True)
+            region_nodes.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 101, node.probe.ttfb_ms))
             nodes_to_test.extend(region_nodes[:limit])
             nodes_to_skip.extend(region_nodes[limit:])
 
-        nodes_to_test.sort(key=lambda node: node.total_score, reverse=True)
-        nodes_to_skip.sort(key=lambda node: node.total_score, reverse=True)
+        nodes_to_test.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 101, node.probe.ttfb_ms))
+        nodes_to_skip.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 101, node.probe.ttfb_ms))
         nodes_to_skip.extend(invalid_nodes)
         return nodes_to_test, nodes_to_skip
 
@@ -71,13 +76,19 @@ class SubscriptionRefreshService:
         sem: asyncio.Semaphore,
         *,
         force_probe: bool = False,
+        api_sites: list[dict] | None = None,
+        probe_config: dict | None = None,
     ) -> AnalyzedNode:
+        # Direct callers must get the same immutable per-node snapshot as
+        # run_nodes; otherwise cache lookup and the ensuing probe can observe
+        # different site configurations.
+        probe_config = SubscriptionRefreshService.freeze_probe_config(probe_config, api_sites)
         async with sem:
             process = None
             config_path = None
             try:
                 if not force_probe:
-                    cached_probe = await ProbeCache.get(node)
+                    cached_probe = await ProbeCache.get(node, probe_config=probe_config)
                     if cached_probe is not None:
                         print(f"[Cache Hit] {node.remark}")
                         return NodeAnalyzer.analyze(node, cached_probe)
@@ -85,12 +96,12 @@ class SubscriptionRefreshService:
                 local_port = get_free_local_port()
                 process, config_path = await TunnelController.start_tunnel(node, local_port)
                 socks5_url = f"socks5://127.0.0.1:{local_port}"
-                probe_data = await LightweightProbe.run_probe(node, socks5_url)
-                await ProbeCache.set(node, probe_data)
+                probe_data = await LightweightProbe.run_probe(node, socks5_url, probe_config=probe_config)
+                await ProbeCache.set(node, probe_data, probe_config=probe_config)
                 return NodeAnalyzer.analyze(node, probe_data)
             except Exception as e:
                 print(f"[Filter Error] {node.remark}: {e}")
-                probe = ProbeData(9999.0, 9999.0, "", "Unknown", "", 0)
+                probe = ProbeData(9999.0, 9999.0, "", "Unknown", "")
                 return NodeAnalyzer.analyze(node, probe)
             finally:
                 await TunnelController.stop_tunnel(process, config_path)
@@ -108,7 +119,7 @@ class SubscriptionRefreshService:
             return await BandwidthTester.run_speed_test(node_analyzed, socks5_url)
         except Exception as e:
             print(f"[SpeedTest Tunnel Error] {node_analyzed.node.remark}: {e}")
-            return TestedNode(node_analyzed, 0.0)
+            return TestedNode(node_analyzed, None, "failed")
         finally:
             await TunnelController.stop_tunnel(process, config_path)
 
@@ -120,13 +131,17 @@ class SubscriptionRefreshService:
         speedtest_limit: int,
         force_probe: bool = False,
         progress_callback=None,
+        api_sites: list[dict] | None = None,
+        probe_config: dict | None = None,
     ) -> list[TestedNode]:
+        # Freeze once for every caller (including CLI) before cache/probe work.
+        probe_config = cls.freeze_probe_config(probe_config, api_sites)
         filter_sem = asyncio.Semaphore(settings.FILTER_CONCURRENCY)
         processed = 0
 
         async def filter_with_progress(node: VlessNode) -> AnalyzedNode:
             nonlocal processed
-            result = await cls.process_node_filter(node, filter_sem, force_probe=force_probe)
+            result = await cls.process_node_filter(node, filter_sem, force_probe=force_probe, probe_config=probe_config)
             processed += 1
             if progress_callback:
                 progress_callback("filter", processed, len(nodes))
@@ -162,7 +177,7 @@ class SubscriptionRefreshService:
                 await asyncio.gather(*(speed_with_progress(node) for node in nodes_to_test))
             )
 
-        tested_nodes.extend(TestedNode(node, 0.0) for node in nodes_to_skip)
+        tested_nodes.extend(TestedNode(node, None, "not_tested") for node in nodes_to_skip)
         return tested_nodes
 
     @classmethod
@@ -196,6 +211,14 @@ class SubscriptionRefreshService:
 
         ApiStore.update_job(job_id, phase="filter", total_nodes=len(nodes), processed_nodes=0)
 
+        job = ApiStore.get_job(job_id)
+        if not job:
+            raise ValueError("Refresh job no longer exists")
+        probe_config = job.get("probe_config_snapshot") or {
+            "api_sites": job.get("api_sites_snapshot", []),
+            "exit_ip_endpoint": job.get("exit_ip_endpoint_snapshot") or ApiStore.get_exit_ip_endpoint(),
+        }
+
         def update_progress(phase: str, processed_nodes: int, total_nodes: int) -> None:
             ApiStore.update_job(
                 job_id,
@@ -209,6 +232,7 @@ class SubscriptionRefreshService:
             speedtest_limit=speedtest_limit,
             force_probe=force_probe,
             progress_callback=update_progress,
+            probe_config=probe_config,
         )
         if not ApiStore.save_results_if_current(
             subscription_id,
@@ -266,6 +290,7 @@ class SubscriptionRefreshService:
             subscription_id,
             speedtest_limit=max(0, int(limit)),
             force_probe=force_probe,
+            probe_config_snapshot=ApiStore.get_probe_config_snapshot(),
         )
         coro = cls.run_job(job["id"])
         try:

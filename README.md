@@ -1,6 +1,6 @@
 # Vless Node Checker
 
-Vless Node Checker 是一个本地 VLESS 节点检测与订阅增强工具。它可以解析订阅链接或本地订阅文件，启动 `sing-box` 隧道检测节点连通性，查询 IP 情报 API，生成节点画像和评分，并输出 Markdown 报告、增强订阅文件和本地 FastAPI 后端服务。
+Vless Node Checker 是一个本地 VLESS 节点检测与订阅增强工具。它可以解析订阅链接或本地订阅文件，启动 `sing-box` 隧道检测节点连通性，查询可配置的 IP 情报 API，生成节点画像，并输出 Markdown 报告、增强订阅文件和本地 FastAPI 后端服务。
 
 增强订阅只重写 VLESS URI 的 `#remark` 节点名，不修改 UUID、地址、端口、传输层、安全参数、SNI、path、host 等连接参数。
 
@@ -15,7 +15,7 @@ Vless Node Checker 是一个本地 VLESS 节点检测与订阅增强工具。它
 ```text
 原始订阅 URL
   -> Vless Node Checker 拉取和检测
-  -> 生成节点画像、评分和增强节点名
+  -> 生成节点画像、风险证据和增强节点名
   -> 客户端订阅增强后的本地 URL
 ```
 
@@ -30,9 +30,9 @@ SG
 增强后可以变成：
 
 ```text
-🇯🇵 JP | 机房 | VPN | 78分 | 210ms
-🇺🇸 US | 疑似家宽 | Clean | 92分 | 180ms
-🇸🇬 SG | 托管机房 | Proxy | 63分 | 420ms
+🇯🇵 JP | 机房 | VPN | 风险 70 | 210ms
+🇺🇸 US | 疑似家宽 | Clean | 风险 10 | 180ms
+🇸🇬 SG | 托管机房 | Proxy | 风险 80 | 420ms
 ```
 
 ## 功能概览
@@ -40,8 +40,8 @@ SG
 - 解析 VLESS 订阅，支持明文 URI 列表和 base64 订阅内容。
 - 检测 TCP Ping、TTFB、出口 IP、实际地区、ASN、绕路和骨干网信息。
 - 查询 IP 情报并生成节点画像，包括网络分类、类型分类、风险分和证据。
-- 根据延迟、风险和地区匹配结果计算节点总分。
-- 对有效节点执行 Top-N 测速，默认 Top 3。
+- 节点是否有效仅由 TTFB 决定；IP 情报 API 只提供画像与风险证据。
+- 普通刷新默认不测速；测速刷新显式指定每区域 Top-N。
 - 导出 Markdown 总览报告和每个节点的详细报告。
 - 导出 compact/detailed 两种增强订阅，并同时提供 plain/base64 文件。
 - 提供本地 FastAPI 后端，支持添加订阅、刷新检测、返回增强订阅和查询详细结果。
@@ -51,13 +51,13 @@ SG
 
 ### 1. 自用订阅增强器
 
-把原始订阅 URL 添加到本地 API 服务后，项目会在后台检测节点，并输出一个新的增强订阅 URL。代理客户端只需要订阅增强 URL，就能看到包含地区、网络类型、风险类型、评分和延迟的节点名。
+把原始订阅 URL 添加到本地 API 服务后，项目会在后台检测节点，并输出一个新的增强订阅 URL。代理客户端只需要订阅增强 URL，就能看到包含地区、网络类型、风险类型、风险值和延迟的节点名。
 
 ### 2. 节点质量筛选
 
-当前增强订阅会按总分、TTFB 和测速结果排序，并默认只导出有效节点。后续可以继续扩展为策略化导出，例如只保留：
+当前增强订阅会按风险、TTFB 和测速结果排序，并默认只导出有效节点。后续可以继续扩展为策略化导出，例如只保留：
 
-- 高于指定分数的节点。
+- 低于指定风险阈值的节点。
 - 指定地区的节点。
 - 家宽或疑似家宽节点。
 - 排除 VPN、Proxy、Tor、滥用风险的节点。
@@ -79,11 +79,11 @@ SG
   -> 解析 VLESS URI
   -> 为每个节点启动临时 sing-box 隧道
   -> 检测 TCP Ping、TTFB、出口 IP、地区、ASN、路由
-  -> 查询 ipwho.is、ipapi.is、Scamalytics、proxycheck.io、Abstract API、IP2Location.io
+  -> 查询当前已启用的 IP 情报站点
   -> 聚合 NodeProfile 网络标签、类型标签、风险分和置信度
-  -> 计算总分并筛选有效节点
+  -> 以 TTFB 判断有效性，并保留 API 风险证据
   -> 对 Top-N 有效节点测速
-  -> 保存最新结果到 SQLite
+  -> 保存最新结果到 JSON
   -> 生成报告、增强订阅和 API 响应
 ```
 
@@ -108,15 +108,7 @@ python -m pip install -r requirements.txt
 
 ## 可选 API 配置
 
-默认会查询 `ipwho.is`、免 key 的 `proxycheck.io` 和 keyless `IP2Location.io`。需要启用更多 IP 情报源时，通过环境变量配置，不要把密钥写入仓库：
-
-```powershell
-$env:IPAPI_KEY="your-ipapi-key"
-$env:SCAMALYTICS_API="https://api13.scamalytics.com/v3/<account>/?key=<key>&ip={ip}"
-$env:ABSTRACT_API_KEY="your-abstract-api-key"
-$env:IP2LOCATION_KEY="your-ip2location-key"
-$env:PROXYCHECK_KEY="your-proxycheck-key"
-```
+默认会查询预置且已启用的站点。请在仪表盘的“API 站点”页中配置 URL 模板、权重、启用状态和本地 API Key；Key 不会由读取接口返回，也不会写入任务结果快照。
 
 ## CLI 使用
 
@@ -164,7 +156,7 @@ result/subscriptions/enhanced_detailed_base64.txt
 
 ## 增强订阅命名
 
-增强订阅复用当前评分和画像规则，不重新实现节点类型判断：
+增强订阅复用当前画像规则，不重新实现节点类型判断：
 
 - 网络分类来自 `NodeProfile.network_labels`。
 - 类型分类来自 `NodeProfile.risk_labels`。
@@ -191,10 +183,10 @@ unknown -> 未知
 
 ```text
 compact:
-{flag} {geo} | {network} | {type} | {score}分 | {ttfb}ms
+{flag} {geo} | {network} | {type} | 风险 {risk} | {ttfb}ms
 
 detailed:
-{flag} {geo} | {network} | {type} | {score}分 | {ping}ms/{ttfb}ms | {speed}Mbps | {asn} | {original_name}
+{flag} {geo} | {network} | {type} | 风险 {risk} | {ping}ms/{ttfb}ms | {speed}Mbps | {asn} | {original_name}
 ```
 
 字段为空时会自动降级，避免输出空分隔符。重复节点名会追加 `#2`、`#3` 等后缀。
@@ -305,7 +297,7 @@ http://127.0.0.1:8000/subscriptions/sub_xxx/enhanced
 http://127.0.0.1:8000/subscriptions/sub_xxx/enhanced?format=plain&mode=detailed
 ```
 
-增强订阅从 SQLite 中保存的最新检测结果实时生成，不依赖 `result/subscriptions/*.txt` 文件。若订阅还没有完成的检测结果，会返回 `409 Conflict`。
+增强订阅从 JSON 中保存的最新检测结果实时生成，不依赖 `result/subscriptions/*.txt` 文件。若订阅还没有完成的检测结果，会返回 `409 Conflict`。
 
 ### 获取详细检测结果
 
@@ -326,12 +318,12 @@ GET /subscriptions/{subscription_id}/results
     {
       "fingerprint": "...",
       "original_name": "JP",
-      "enhanced_name_compact": "🇯🇵 JP | 机房 | Clean | 92分 | 210ms",
-      "enhanced_name_detailed": "🇯🇵 JP | 机房 | Clean | 92分 | 80ms/210ms | 12.34Mbps | Example ASN | JP",
+      "enhanced_name_compact": "🇯🇵 JP | 机房 | Clean | 风险 10 | 210ms",
+      "enhanced_name_detailed": "🇯🇵 JP | 机房 | Clean | 风险 10 | 80ms/210ms | 12.34Mbps | Example ASN | JP",
       "raw_uri": "vless://...",
       "is_valid": true,
       "reject_reason": "",
-      "total_score": 92.0,
+      "risk_score": 35.0,
       "download_speed_mbps": 12.34,
       "probe": {
         "tcp_ping_ms": 80.0,
@@ -339,10 +331,12 @@ GET /subscriptions/{subscription_id}/results
         "actual_ip": "203.0.113.10",
         "actual_geo": "JP",
         "asn_org": "Example ASN",
-        "risk_score": 35.0,
-        "network_labels": ["机房"],
-        "type_labels": ["Clean"],
-        "confidence": "high",
+        "profile": {
+          "risk_score": 35.0,
+          "network_labels": [{"label": "datacenter", "confidence": 0.9}],
+          "risk_labels": [{"label": "clean", "confidence": 0.55}],
+          "confidence": "high"
+        },
         "is_detour": false,
         "is_backbone": true,
         "backbone_info": "CN2",
@@ -365,14 +359,14 @@ POST /subscriptions/{subscription_id}/refresh
 
 ```json
 {
-  "speedtest_limit": 3,
+  "speedtest_limit": 0,
   "force_probe": false
 }
 ```
 
 参数说明：
 
-- `speedtest_limit`: 测速节点数量，默认 `3`；传 `0` 表示不测速。
+- `speedtest_limit`: 每区域测速数量；默认 `0`，普通刷新不测速。
 - `force_probe`: 是否跳过探测缓存重新检测；完成后仍会写入缓存。
 
 同一个订阅同时只允许一个 `queued` 或 `running` 的刷新任务。重复刷新请求会返回当前已有任务，避免重复启动隧道和测速。
@@ -422,16 +416,18 @@ failed
 
 ## 本地存储
 
-API 服务使用 SQLite 保存订阅、任务和最新检测结果：
+API 服务使用 `DATA_DIR`（默认 `data/`）中的 JSON 保存订阅、任务和最新检测结果：
 
 ```text
-data/api.sqlite3
+data/config.json
+data/results/{subscription_id}.json
+data/jobs/{job_id}.json
 ```
 
 探测结果缓存保存在：
 
 ```text
-cache/probe_cache.sqlite3
+data/probe-cache/{cache_key}.json
 ```
 
 第一版只保存每个订阅的最新详细检测结果，不保存完整历史。
@@ -441,8 +437,8 @@ cache/probe_cache.sqlite3
 适合优先推进的方向：
 
 - 可配置命名模板，让用户决定哪些字段进入 compact 或 detailed 节点名。
-- 增强订阅过滤参数，例如 `min_score`、`geo`、`network`、`exclude_type`、`max_ttfb`、`limit`。
-- 保存历史检测结果，用于观察节点 IP、风险标签、评分和路线变化。
+- 增强订阅过滤参数，例如 `max_risk`、`geo`、`network`、`exclude_type`、`max_ttfb`、`limit`。
+- 保存历史检测结果，用于观察节点 IP、风险标签和路线变化。
 - 多订阅合并、去重、统一排序和策略化导出。
 - 前端展示每个 API 的原始判断差异，帮助识别 API 冲突和低置信度结果。
 - 为公网或共享部署增加访问 token、日志脱敏、限流、后台定时刷新和部署配置。
@@ -467,5 +463,5 @@ python -m unittest discover -s tests
 
 - 检测会启动 `sing-box` 子进程，并在完成后清理。
 - 刷新检测会访问订阅 URL、IP 情报 API、测速 URL 和路由查询服务。
-- 默认测速 Top 3 有效节点，用于控制检测时间和流量消耗。
+- 默认普通刷新不测速；测速刷新由用户输入每区域数量，并可选择强制探测。
 - 当前 API 设计用于本机使用，不包含公网部署、鉴权、Docker 或反向代理配置。

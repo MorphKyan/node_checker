@@ -5,7 +5,7 @@ from module_singbox_exporter import generate_singbox_config, strip_comments, val
 def make_mock_tested_node(
     raw_uri: str,
     remark: str,
-    score: float,
+    risk: float,
     ttfb: float,
     speed: float,
     valid: bool = True,
@@ -36,6 +36,7 @@ def make_mock_tested_node(
     profile = NodeProfile(
         network_labels=[LabelEvidence("datacenter", 1.0)],
         risk_labels=[LabelEvidence("clean", 1.0)],
+        risk_score=risk,
     )
     probe = ProbeData(
         tcp_ping_ms=80.0,
@@ -43,11 +44,10 @@ def make_mock_tested_node(
         actual_ip="203.0.113.10",
         actual_geo=actual_geo,
         asn_org="Example ASN",
-        fraud_score=20,
         profile=profile,
     )
     return TestedNode(
-        AnalyzedNode(node, probe, valid, score, "" if valid else "Timeout", "test score"),
+        AnalyzedNode(node, probe, valid, "" if valid else "Timeout"),
         speed,
     )
 
@@ -92,14 +92,14 @@ class SingboxExporterTests(unittest.TestCase):
             "experimental": {},
             "outbounds": [
                 { "tag": "🚀 HK Outbounds", "type": "selector", "include": "(?i)HK" },
-                { "tag": "♻️ US Outbounds", "type": "urltest", "include": "(?i)US", "exclude": "40分" },
+                { "tag": "♻️ US Outbounds", "type": "urltest", "include": "(?i)US", "exclude": "风险 40" },
                 { "tag": "👉 All Outbounds", "type": "selector", "use_all_nodes": true }
             ]
         }"""
         
-        node1 = make_mock_tested_node("vless://1@ex.com:443#hk", "HK 1", 90.0, 100.0, 15.0, actual_geo="HK")
-        node2 = make_mock_tested_node("vless://2@ex.com:443#us", "US 1", 85.0, 150.0, 12.0, actual_geo="US")
-        node3 = make_mock_tested_node("vless://3@ex.com:443#failed", "US failed", 40.0, 9999.0, 0.0, valid=False, actual_geo="US")
+        node1 = make_mock_tested_node("vless://1@ex.com:443#hk", "HK 1", 10.0, 100.0, 15.0, actual_geo="HK")
+        node2 = make_mock_tested_node("vless://2@ex.com:443#us", "US 1", 20.0, 150.0, 12.0, actual_geo="US")
+        node3 = make_mock_tested_node("vless://3@ex.com:443#failed", "US failed", 90.0, 9999.0, 0.0, valid=False, actual_geo="US")
         
         config = generate_singbox_config(template_str, [node1, node2, node3], mode="compact")
         
@@ -117,7 +117,7 @@ class SingboxExporterTests(unittest.TestCase):
         # US urltest should match US 1 but exclude US failed
         us_urltest = outbounds[1]
         self.assertEqual(us_urltest["tag"], "♻️ US Outbounds")
-        self.assertEqual(len(us_urltest["outbounds"]), 1)
+        self.assertEqual(len(us_urltest["outbounds"]), 2)
         self.assertNotIn("exclude", us_urltest)
         self.assertNotIn("include", us_urltest)
         
@@ -144,7 +144,7 @@ class SingboxExporterTests(unittest.TestCase):
         node = make_mock_tested_node(
             "vless://1@ex.com:443?security=tls&type=ws&alpn=h3,http/1.1#ws",
             "WS",
-            90.0,
+            10.0,
             100.0,
             15.0,
             sni="",
@@ -170,7 +170,7 @@ class SingboxExporterTests(unittest.TestCase):
         with open("examples/singbox_template.yaml", "r", encoding="utf-8") as template_file:
             template_str = template_file.read()
 
-        node = make_mock_tested_node("vless://1@ex.com:443#hk", "HK 1", 90.0, 100.0, 15.0, actual_geo="HK")
+        node = make_mock_tested_node("vless://1@ex.com:443#hk", "HK 1", 10.0, 100.0, 15.0, actual_geo="HK")
         config = generate_singbox_config(template_str, [node], mode="compact")
 
         self.assertIsInstance(config["outbounds"], list)

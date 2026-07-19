@@ -1,5 +1,5 @@
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields
 
 from models import ApiVerdict, AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode
 
@@ -19,6 +19,8 @@ def _restore_api_verdict(data) -> ApiVerdict:
         return data
     return ApiVerdict(
         source=data.get("source", ""),
+        site_id=data.get("site_id", ""),
+        status=data.get("status", "no_data"),
         network_labels=_restore_label_evidence(data.get("network_labels")),
         risk_labels=_restore_label_evidence(data.get("risk_labels")),
         risk_score=data.get("risk_score"),
@@ -35,7 +37,7 @@ def restore_node_profile(data) -> NodeProfile:
         display_labels=list(data.get("display_labels") or ["未知"]),
         network_labels=_restore_label_evidence(data.get("network_labels")),
         risk_labels=_restore_label_evidence(data.get("risk_labels")),
-        risk_score=float(data.get("risk_score", 0.0) or 0.0),
+        risk_score=float(data["risk_score"]) if data.get("risk_score") is not None else None,
         confidence=data.get("confidence", "low"),
         evidence=[
             _restore_api_verdict(item)
@@ -46,7 +48,8 @@ def restore_node_profile(data) -> NodeProfile:
 
 
 def restore_probe_data(data: dict) -> ProbeData:
-    data = dict(data)
+    allowed = {field.name for field in fields(ProbeData)}
+    data = {key: value for key, value in dict(data).items() if key in allowed}
     if "profile" in data:
         data["profile"] = restore_node_profile(data["profile"])
     return ProbeData(**data)
@@ -77,14 +80,13 @@ def restore_tested_nodes(data: list[dict]) -> list[TestedNode]:
             node=node,
             probe=probe,
             is_valid=analyzed_data["is_valid"],
-            total_score=analyzed_data["total_score"],
             reject_reason=analyzed_data.get("reject_reason", ""),
-            score_details=analyzed_data.get("score_details", ""),
         )
         restored.append(
             TestedNode(
                 analyzed_node=analyzed,
-                download_speed_mbps=item.get("download_speed_mbps", 0.0),
+                download_speed_mbps=item.get("download_speed_mbps"),
+                speedtest_status=item.get("speedtest_status", "not_tested"),
             )
         )
     return restored

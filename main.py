@@ -7,6 +7,7 @@ from module_exporter import ResultExporter
 from module_cache import ProbeCache
 from module_subscription_exporter import SubscriptionExporter
 from module_subscription_service import SubscriptionRefreshService
+from module_api_store import ApiStore
 
 
 async def main():
@@ -32,6 +33,7 @@ async def main():
     tested_nodes = await SubscriptionRefreshService.run_nodes(
         nodes,
         speedtest_limit=settings.API_DEFAULT_SPEEDTEST_LIMIT,
+        probe_config=ApiStore.get_probe_config_snapshot(),
     )
     valid_count = sum(1 for n in tested_nodes if n.analyzed_node.is_valid)
     print(f"Filter Phase completed. {valid_count} nodes passed.")

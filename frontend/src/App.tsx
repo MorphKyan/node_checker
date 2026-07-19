@@ -36,7 +36,7 @@ import {
 import { ApiError, createApiClient, enhancedUrl, singboxUrl } from "./api";
 import type { ApiClient } from "./api";
 import { useAppData } from "./appData";
-import { duration, formatTime, groupCount, scoreBuckets, statusTone } from "./appUtils";
+import { duration, formatTime, groupCount, riskBuckets, statusTone } from "./appUtils";
 import { filterNodes } from "./nodeFilters";
 import { defaultPreferences, isExportFormat, isExportMode, loadPreferences, savePreferences } from "./preferences";
 import type {
@@ -51,10 +51,12 @@ import type {
   SubscriptionResults,
   SubscriptionSummary,
   SingboxTemplate,
+  ApiSite,
+  ApiSiteInput,
 } from "./types";
 import { Badge, Button, EmptyState, Input, Label, Panel, Select } from "./components/ui";
 
-type View = "dashboard" | "subscriptions" | "nodes" | "jobs" | "export" | "settings" | "singbox";
+type View = "dashboard" | "subscriptions" | "nodes" | "jobs" | "export" | "settings" | "singbox" | "api-sites";
 
 const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
   { id: "dashboard", label: "总览", icon: LayoutDashboard },
@@ -97,7 +99,7 @@ export default function App() {
   const [nodeNetwork, setNodeNetwork] = useState("all");
   const [nodeType, setNodeType] = useState("all");
   const [maxTtfb, setMaxTtfb] = useState("");
-  const [minScore, setMinScore] = useState("");
+  const [maxRisk, setMaxRisk] = useState("");
   const [minSpeed, setMinSpeed] = useState("");
   const [detourFilter, setDetourFilter] = useState("all");
   const [backboneFilter, setBackboneFilter] = useState("all");
@@ -113,6 +115,8 @@ export default function App() {
 
   const queryClient = useQueryClient();
   const api = useMemo(() => createApiClient(preferences.apiBaseUrl), [preferences.apiBaseUrl]);
+  const apiSites = useQuery({ queryKey: ["api-sites", preferences.apiBaseUrl], queryFn: api.getApiSites });
+  const providers = useQuery({ queryKey: ["api-site-providers", preferences.apiBaseUrl], queryFn: api.getApiSiteProviders });
   const { subscriptions, results, jobs } = useAppData(api, preferences);
   const subscriptionList = subscriptions.data || [];
 
@@ -128,14 +132,15 @@ export default function App() {
   const jobList = jobs.map((job) => job.data).filter(Boolean) as JobStatus[];
 
   const runningJobs = jobList.filter((job) => job.status === "queued" || job.status === "running");
-  const averageScore = allNodes.length ? allNodes.reduce((sum, node) => sum + node.total_score, 0) / allNodes.length : 0;
+  const knownRiskNodes = allNodes.filter((node) => node.probe.risk_score !== null);
+  const averageRisk = knownRiskNodes.length ? knownRiskNodes.reduce((sum, node) => sum + (node.probe.risk_score || 0), 0) / knownRiskNodes.length : null;
   const averageTtfb = allNodes.length ? allNodes.reduce((sum, node) => sum + node.probe.ttfb_ms, 0) / allNodes.length : 0;
-  const maxSpeed = allNodes.reduce((max, node) => Math.max(max, node.download_speed_mbps), 0);
+  const maxSpeed = allNodes.reduce((max, node) => Math.max(max, node.download_speed_mbps || 0), 0);
 
-  const nodeFilters = { nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, minScore, maxTtfb, minSpeed, detourFilter, backboneFilter };
+  const nodeFilters = { nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, maxRisk, maxTtfb, minSpeed, detourFilter, backboneFilter };
   const filteredNodes = useMemo(
     () => filterNodes(selectedResult?.nodes || [], nodeFilters),
-    [selectedResult, nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, minScore, maxTtfb, minSpeed, detourFilter, backboneFilter],
+    [selectedResult, nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, maxRisk, maxTtfb, minSpeed, detourFilter, backboneFilter],
   );
 
   const totalPages = Math.max(1, Math.ceil(filteredNodes.length / preferences.pageSize));
@@ -184,6 +189,12 @@ export default function App() {
     },
     onError: (error) => setOperationError(errorMessage(error)),
   });
+  const refreshApiSites = () => void queryClient.invalidateQueries({ queryKey: ["api-sites"] });
+  const createApiSite = useMutation({ mutationFn: api.createApiSite, onSuccess: refreshApiSites, onError: (error) => setOperationError(errorMessage(error)) });
+  const updateApiSite = useMutation({ mutationFn: ({ id, input }: { id: string; input: Partial<ApiSiteInput> }) => api.updateApiSite(id, input), onSuccess: refreshApiSites, onError: (error) => setOperationError(errorMessage(error)) });
+  const deleteApiSite = useMutation({ mutationFn: api.deleteApiSite, onSuccess: refreshApiSites, onError: (error) => setOperationError(errorMessage(error)) });
+  const orderApiSites = useMutation({ mutationFn: api.orderApiSites, onSuccess: refreshApiSites, onError: (error) => setOperationError(errorMessage(error)) });
+  const updateExitIpEndpoint = useMutation({ mutationFn: api.updateExitIpEndpoint, onSuccess: refreshApiSites, onError: (error) => setOperationError(errorMessage(error)) });
 
   const cancelJob = useMutation({
     mutationFn: api.cancelJob,
@@ -294,6 +305,9 @@ export default function App() {
               </button>
             );
           })}
+          <button onClick={() => setView("api-sites")} className={`flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm font-medium transition ${view === "api-sites" ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"}`}>
+            <SlidersHorizontal className="h-4 w-4" />API 站点
+          </button>
         </nav>
       </aside>
 
@@ -326,7 +340,7 @@ export default function App() {
               subscriptions={subscriptionList}
               nodes={allNodes}
               runningJobs={runningJobs.length}
-              averageScore={averageScore}
+              averageRisk={averageRisk}
               averageTtfb={averageTtfb}
               maxSpeed={maxSpeed}
             />
@@ -361,6 +375,8 @@ export default function App() {
             />
           )}
 
+          {view === "api-sites" && <ApiSitesView sites={apiSites.data?.sites || []} exitIpEndpoint={apiSites.data?.exit_ip_endpoint || ""} providers={providers.data || []} onCreate={(input) => createApiSite.mutate(input)} onUpdate={(id, input) => updateApiSite.mutate({ id, input })} onDelete={(id) => deleteApiSite.mutate(id)} onOrder={(ids) => orderApiSites.mutate(ids)} onUpdateEndpoint={(value) => updateExitIpEndpoint.mutate(value)} />}
+
           {view === "nodes" && (
             <NodesView
               subscriptions={subscriptionList}
@@ -374,7 +390,7 @@ export default function App() {
               geoOptions={geoOptions}
               networkOptions={networkOptions}
               typeOptions={typeOptions}
-              filters={{ nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, minScore, maxTtfb, minSpeed, detourFilter, backboneFilter }}
+              filters={{ nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, maxRisk, maxTtfb, minSpeed, detourFilter, backboneFilter }}
               onSelectSubscription={setSelectedSubscriptionId}
               onFilters={(next) => {
                 setPage(1);
@@ -383,7 +399,7 @@ export default function App() {
                 if (next.nodeGeo !== undefined) setNodeGeo(next.nodeGeo);
                 if (next.nodeNetwork !== undefined) setNodeNetwork(next.nodeNetwork);
                 if (next.nodeType !== undefined) setNodeType(next.nodeType);
-                if (next.minScore !== undefined) setMinScore(next.minScore);
+                if (next.maxRisk !== undefined) setMaxRisk(next.maxRisk);
                 if (next.maxTtfb !== undefined) setMaxTtfb(next.maxTtfb);
                 if (next.minSpeed !== undefined) setMinSpeed(next.minSpeed);
                 if (next.detourFilter !== undefined) setDetourFilter(next.detourFilter);
@@ -447,14 +463,14 @@ function Dashboard({
   subscriptions,
   nodes,
   runningJobs,
-  averageScore,
+  averageRisk,
   averageTtfb,
   maxSpeed,
 }: {
   subscriptions: SubscriptionSummary[];
   nodes: NodeResult[];
   runningJobs: number;
-  averageScore: number;
+  averageRisk: number | null;
   averageTtfb: number;
   maxSpeed: number;
 }) {
@@ -462,7 +478,7 @@ function Dashboard({
   const networkData = groupCount(nodes.flatMap((node) => node.probe.network_labels));
   const typeData = groupCount(nodes.flatMap((node) => node.probe.type_labels));
   const geoData = groupCount(nodes.map((node) => node.probe.actual_geo));
-  const speedTop = [...nodes].sort((a, b) => b.download_speed_mbps - a.download_speed_mbps).slice(0, 10).map((node) => ({ name: node.original_name || node.probe.actual_geo, value: Number(node.download_speed_mbps.toFixed(2)) }));
+  const speedTop = [...nodes].filter((node) => node.download_speed_mbps !== null).sort((a, b) => (b.download_speed_mbps || 0) - (a.download_speed_mbps || 0)).slice(0, 10).map((node) => ({ name: node.original_name || node.probe.actual_geo, value: Number((node.download_speed_mbps || 0).toFixed(2)) }));
   const ttfbTop = [...nodes].sort((a, b) => a.probe.ttfb_ms - b.probe.ttfb_ms).slice(0, 10).map((node) => ({ name: node.original_name || node.probe.actual_geo, value: Math.round(node.probe.ttfb_ms) }));
 
   return (
@@ -472,13 +488,13 @@ function Dashboard({
         <Stat title="节点总数" value={nodes.length} />
         <Stat title="有效节点" value={`${validCount} / ${nodes.length || 0}`} />
         <Stat title="运行任务" value={runningJobs} />
-        <Stat title="平均分" value={averageScore.toFixed(1)} />
+        <Stat title="平均风险" value={averageRisk === null ? "未知" : averageRisk.toFixed(1)} />
         <Stat title="平均 TTFB" value={`${averageTtfb.toFixed(0)} ms`} />
         <Stat title="最高测速" value={`${maxSpeed.toFixed(2)} Mbps`} />
         <Stat title="有效率" value={`${nodes.length ? ((validCount / nodes.length) * 100).toFixed(1) : "0.0"}%`} />
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <ChartPanel title="评分分布" data={scoreBuckets(nodes)} />
+        <ChartPanel title="风险分布" data={riskBuckets(nodes)} />
         <ChartPanel title="网络分类" data={networkData} />
         <ChartPanel title="类型分类" data={typeData} />
         <ChartPanel title="地区分布" data={geoData} />
@@ -539,6 +555,8 @@ function SubscriptionsView(props: {
   onOpenNodes: (id: string) => void;
   onOpenExport: (id: string) => void;
 }) {
+  const [speedtestLimit, setSpeedtestLimit] = useState("1");
+  const [forceProbe, setForceProbe] = useState(false);
   return (
     <div className="space-y-4">
       <Panel>
@@ -580,8 +598,9 @@ function SubscriptionsView(props: {
                   <td className="px-3 py-3">
                     <div className="flex flex-wrap gap-2">
                       <Button variant="secondary" onClick={() => props.onRefresh(subscription.id)}>刷新</Button>
-                      <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, 0, false)}>不测速</Button>
-                      <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, undefined, true)}>强制</Button>
+                      <Input className="w-16" type="number" min="0" value={speedtestLimit} onChange={(event) => setSpeedtestLimit(event.target.value)} title="每区域测速数量" />
+                      <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={forceProbe} onChange={(event) => setForceProbe(event.target.checked)} />强制探测</label>
+                      <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, Math.max(0, Number(speedtestLimit) || 0), forceProbe)}>测速刷新</Button>
                       <Button variant="ghost" onClick={() => props.onStartEdit(subscription)}>编辑</Button>
                       <Button variant="ghost" onClick={() => props.onOpenNodes(subscription.id)}>节点</Button>
                       <Button variant="ghost" onClick={() => props.onOpenExport(subscription.id)}>导出</Button>
@@ -599,7 +618,57 @@ function SubscriptionsView(props: {
   );
 }
 
-function NodesView(props: {
+function ApiSitesView(props: {
+  sites: ApiSite[];
+  exitIpEndpoint: string;
+  providers: string[];
+  onCreate: (input: ApiSiteInput) => void;
+  onUpdate: (id: string, input: Partial<ApiSiteInput>) => void;
+  onDelete: (id: string) => void;
+  onOrder: (ids: string[]) => void;
+  onUpdateEndpoint: (value: string) => void;
+}) {
+  const blank = (): ApiSiteInput => ({ id: "", column_name: "", provider: props.providers[0] || "ipwhois", url_template: "https://example.com/{ip}", api_key: "", weight: 1, enabled: false });
+  const [draft, setDraft] = useState<ApiSiteInput>(blank);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [endpoint, setEndpoint] = useState(props.exitIpEndpoint);
+  useEffect(() => setEndpoint(props.exitIpEndpoint), [props.exitIpEndpoint]);
+  const save = () => {
+    if (editing) props.onUpdate(editing, draft);
+    else props.onCreate(draft);
+    setEditing(null); setDraft(blank());
+  };
+  const begin = (site: ApiSite) => {
+    setEditing(site.id);
+    setDraft({ id: site.id, column_name: site.column_name, provider: site.provider, url_template: site.url_template, api_key: "", weight: site.weight, enabled: site.enabled });
+  };
+  return <div className="space-y-4">
+    <Panel>
+      <div className="mb-2 text-sm font-semibold">出口 IP 端点</div>
+      <div className="flex gap-2"><Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://..." /><Button onClick={() => props.onUpdateEndpoint(endpoint)}>保存</Button></div>
+      <p className="mt-2 text-xs text-slate-500">通过代理查询出口 IP；不参与风险评分。</p>
+    </Panel>
+    <Panel>
+      <div className="mb-3 text-sm font-semibold">{editing ? "编辑 API 站点" : "新增 API 站点"}</div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Input disabled={Boolean(editing)} value={draft.id} onChange={(e) => setDraft({ ...draft, id: e.target.value })} placeholder="唯一 ID" />
+        <Input value={draft.column_name} onChange={(e) => setDraft({ ...draft, column_name: e.target.value })} placeholder="表格列名" />
+        <Select value={draft.provider} onChange={(e) => setDraft({ ...draft, provider: e.target.value })}>{props.providers.map((provider) => <option key={provider}>{provider}</option>)}</Select>
+        <Input type="number" min="0.01" step="0.1" value={draft.weight} onChange={(e) => setDraft({ ...draft, weight: Number(e.target.value) })} placeholder="权重" />
+        <Input className="col-span-2" value={draft.url_template} onChange={(e) => setDraft({ ...draft, url_template: e.target.value })} placeholder="URL 模板，必须含 {ip}" />
+        <Input type="password" value={draft.api_key || ""} onChange={(e) => setDraft({ ...draft, api_key: e.target.value, clear_api_key: false })} placeholder="API Key（留空保持不变）" />
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />启用</label>
+        {editing && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(draft.clear_api_key)} onChange={(e) => setDraft({ ...draft, clear_api_key: e.target.checked })} />清除 Key</label>}
+      </div>
+      <div className="mt-3 flex gap-2"><Button onClick={save}>{editing ? "保存" : "创建"}</Button>{editing && <Button variant="secondary" onClick={() => { setEditing(null); setDraft(blank()); }}>取消</Button>}</div>
+    </Panel>
+    <Panel>
+      <table className="w-full text-left text-sm"><thead><tr><th>顺序</th><th>列名</th><th>Provider</th><th>URL</th><th>Key</th><th>权重</th><th>状态</th><th>操作</th></tr></thead><tbody>{props.sites.map((site, index) => <tr className="border-t" key={site.id}><td>{index + 1}</td><td>{site.column_name}</td><td>{site.provider}</td><td className="max-w-xs truncate">{site.url_template}</td><td>{site.api_key_configured ? "已配置" : "未配置"}</td><td>{site.weight}</td><td><input type="checkbox" checked={site.enabled} onChange={(e) => props.onUpdate(site.id, { enabled: e.target.checked })} /></td><td className="space-x-2"><Button variant="ghost" onClick={() => props.onOrder(props.sites.map((s, i) => i === index && index > 0 ? props.sites[index - 1].id : i === index - 1 ? site.id : s.id))}>↑</Button><Button variant="ghost" onClick={() => props.onOrder(props.sites.map((s, i) => i === index && index < props.sites.length - 1 ? props.sites[index + 1].id : i === index + 1 ? site.id : s.id))}>↓</Button><Button variant="ghost" onClick={() => begin(site)}>编辑</Button><Button variant="danger" onClick={() => props.onDelete(site.id)}>删除</Button></td></tr>)}</tbody></table>
+    </Panel>
+  </div>;
+}
+
+export function NodesView(props: {
   subscriptions: SubscriptionSummary[];
   selectedId: string;
   result: SubscriptionResults | null;
@@ -645,7 +714,7 @@ function NodesView(props: {
           <FilterSelect label="地区" value={props.filters.nodeGeo} onChange={(value) => props.onFilters({ nodeGeo: value })} options={[["all", "全部"], ...props.geoOptions.map((item) => [item, item] as [string, string])]} />
           <FilterSelect label="网络分类" value={props.filters.nodeNetwork} onChange={(value) => props.onFilters({ nodeNetwork: value })} options={[["all", "全部"], ...props.networkOptions.map((item) => [item, item] as [string, string])]} />
           <FilterSelect label="类型分类" value={props.filters.nodeType} onChange={(value) => props.onFilters({ nodeType: value })} options={[["all", "全部"], ...props.typeOptions.map((item) => [item, item] as [string, string])]} />
-          <div><Label>最低分</Label><Input className="mt-1" type="number" value={props.filters.minScore} onChange={(event) => props.onFilters({ minScore: event.target.value })} /></div>
+          <div><Label>最高风险</Label><Input className="mt-1" type="number" value={props.filters.maxRisk} onChange={(event) => props.onFilters({ maxRisk: event.target.value })} /></div>
           <div><Label>最高 TTFB</Label><Input className="mt-1" type="number" value={props.filters.maxTtfb} onChange={(event) => props.onFilters({ maxTtfb: event.target.value })} /></div>
           <div><Label>最低测速</Label><Input className="mt-1" type="number" value={props.filters.minSpeed} onChange={(event) => props.onFilters({ minSpeed: event.target.value })} /></div>
           <FilterSelect label="绕路" value={props.filters.detourFilter} onChange={(value) => props.onFilters({ detourFilter: value })} options={[["all", "全部"], ["yes", "是"], ["no", "否"]]} />
@@ -663,7 +732,8 @@ function NodesView(props: {
             <table className="w-full min-w-[1280px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-3 py-2">状态</th><th className="px-3 py-2">增强名称</th><th className="px-3 py-2">地区</th><th className="px-3 py-2">网络</th><th className="px-3 py-2">类型</th><th className="px-3 py-2">总分</th><th className="px-3 py-2">风险</th><th className="px-3 py-2">Ping</th><th className="px-3 py-2">TTFB</th><th className="px-3 py-2">测速</th><th className="px-3 py-2">ASN</th><th className="px-3 py-2">操作</th>
+                  {(props.result?.api_sites_snapshot || []).map((site) => <th key={site.id} className="px-3 py-2">{site.column_name}</th>)}
+                  <th className="px-3 py-2">状态</th><th className="px-3 py-2">增强名称</th><th className="px-3 py-2">地区</th><th className="px-3 py-2">网络</th><th className="px-3 py-2">类型</th><th className="px-3 py-2">风险</th><th className="px-3 py-2">Ping</th><th className="px-3 py-2">TTFB</th><th className="px-3 py-2">测速</th><th className="px-3 py-2">ASN</th><th className="px-3 py-2">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -673,16 +743,22 @@ function NodesView(props: {
                   const detailedKey = `${node.fingerprint}:detailed`;
                   return (
                     <tr key={node.fingerprint} className="border-t border-border">
+                      {(props.result?.api_sites_snapshot || []).map((site) => {
+                        const verdictForSite = node.probe.evidence.find((item) => item.site_id === site.id);
+                        if (!verdictForSite) return <td key={site.id} className="px-3 py-3 text-slate-400">无数据</td>;
+                        if (verdictForSite.status !== "success") return <td key={site.id} className="px-3 py-3 text-red-600">{verdictForSite.status}</td>;
+                        const labels = [...verdictForSite.network_labels, ...verdictForSite.risk_labels].map((label) => label.display).join("/");
+                        return <td key={site.id} className="px-3 py-3">{labels || "-"}<br />{verdictForSite.risk_score === null ? "风险未知" : `风险 ${verdictForSite.risk_score.toFixed(0)}`}</td>;
+                      })}
                       <td className="px-3 py-3"><Badge tone={node.is_valid ? "green" : "red"}>{node.is_valid ? "有效" : "失败"}</Badge></td>
                       <td className="max-w-xs truncate px-3 py-3 font-medium">{node.enhanced_name_compact}</td>
                       <td className="px-3 py-3">{node.probe.actual_geo}</td>
                       <td className="px-3 py-3">{node.probe.network_labels.join("/") || "-"}</td>
                       <td className="px-3 py-3">{node.probe.type_labels.join("/") || "-"}</td>
-                      <td className="px-3 py-3">{node.total_score.toFixed(1)}</td>
-                      <td className="px-3 py-3">{node.probe.risk_score.toFixed(1)}</td>
+                      <td className="px-3 py-3">{node.probe.risk_score === null ? "未知" : node.probe.risk_score.toFixed(1)}</td>
                       <td className="px-3 py-3">{node.probe.tcp_ping_ms.toFixed(0)}</td>
                       <td className="px-3 py-3">{node.probe.ttfb_ms.toFixed(0)}</td>
-                      <td className="px-3 py-3">{node.download_speed_mbps.toFixed(2)}</td>
+                      <td className="px-3 py-3">{node.download_speed_mbps === null ? (node.speedtest_status === "failed" ? "失败" : "未测速") : node.download_speed_mbps.toFixed(2)}</td>
                       <td className="max-w-xs truncate px-3 py-3">{node.probe.asn_org}</td>
                       <td className="px-3 py-3">
                         <div className="flex gap-2">
@@ -776,7 +852,7 @@ function ExportView(props: {
         <div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">订阅内容</div><div className="flex gap-2"><Button variant="secondary" onClick={() => copyText(props.preview)}><Clipboard className="h-4 w-4" />复制内容</Button><Button variant="secondary" onClick={() => downloadText(`enhanced_${props.mode}_${props.format}.txt`, props.preview)}><Download className="h-4 w-4" />下载</Button></div></div>
         <textarea className="h-96 w-full rounded-md border border-border bg-slate-950 p-3 font-mono text-xs text-slate-50" value={props.preview} readOnly placeholder="点击预览后显示增强订阅内容" />
       </Panel>
-      <Panel><div className="text-sm font-semibold">命名示例</div><div className="mt-2 space-y-2 text-sm text-slate-600"><div>🇯🇵 JP | 机房 | Clean | 92分 | 210ms</div><div>🇯🇵 JP | 机房 | Clean | 92分 | 80ms/210ms | 12.34Mbps | Example ASN | JP</div></div></Panel>
+      <Panel><div className="text-sm font-semibold">命名示例</div><div className="mt-2 space-y-2 text-sm text-slate-600"><div>🇯🇵 JP | 机房 | Clean | 风险 10 | 210ms</div><div>🇯🇵 JP | 机房 | Clean | 风险 10 | 80ms/210ms | 12.34Mbps | Example ASN | JP</div></div></Panel>
     </div>
   );
 }
@@ -1104,7 +1180,7 @@ function SingboxView(props: {
   const [previewMode, setPreviewMode] = useState<"compact" | "detailed">("compact");
   const [previewValidOnly, setPreviewValidOnly] = useState(true);
   const [previewLimit, setPreviewLimit] = useState("");
-  const [previewMinScore, setPreviewMinScore] = useState("");
+  const [previewMaxRisk, setPreviewMaxRisk] = useState("");
   const [generatedConfig, setGeneratedConfig] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState("");
@@ -1117,7 +1193,7 @@ function SingboxView(props: {
           mode: previewMode,
           valid_only: previewValidOnly,
           limit: previewLimit ? parseInt(previewLimit) : undefined,
-          min_score: previewMinScore ? parseFloat(previewMinScore) : undefined
+          max_risk: previewMaxRisk ? parseFloat(previewMaxRisk) : undefined
         }
       )
     : "";
@@ -1137,7 +1213,7 @@ function SingboxView(props: {
           mode: previewMode,
           valid_only: previewValidOnly,
           limit: previewLimit ? parseInt(previewLimit) : undefined,
-          min_score: previewMinScore ? parseFloat(previewMinScore) : undefined
+          max_risk: previewMaxRisk ? parseFloat(previewMaxRisk) : undefined
         }
       );
       const formatted = typeof res === "string" ? res : JSON.stringify(res, null, 2);
@@ -1354,12 +1430,12 @@ function SingboxView(props: {
                     </Select>
                   </div>
                   <div>
-                    <Label>最低评分分数</Label>
+                    <Label>最高风险</Label>
                     <Input
                       type="number"
                       className="mt-1 w-full text-xs"
-                      value={previewMinScore}
-                      onChange={(e) => setPreviewMinScore(e.target.value)}
+                      value={previewMaxRisk}
+                      onChange={(e) => setPreviewMaxRisk(e.target.value)}
                       placeholder="0-100"
                     />
                   </div>

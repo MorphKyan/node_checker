@@ -50,7 +50,7 @@ export interface ApiClient {
   getJob(id: string): Promise<JobStatus>;
   cancelJob(id: string): Promise<JobStatus>;
   getResults(id: string): Promise<SubscriptionResults>;
-  getEnhanced(id: string, params: { mode: ExportMode; format: ExportFormat; valid_only: boolean }): Promise<string>;
+  getEnhanced(id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number }): Promise<string>;
   getSettings(): Promise<RuntimeSettings>;
   getSettingsMetadata(): Promise<RuntimeSettingsMetadata>;
   updateSettings(input: Partial<RuntimeSettings>): Promise<RuntimeSettings>;
@@ -131,15 +131,7 @@ export function createApiClient(baseUrl: string): ApiClient {
         method: "POST",
       }),
     getResults: (id) => request(baseUrl, `/subscriptions/${pathSegment(id)}/results`),
-    getEnhanced: (id, params) => {
-      const query = new URLSearchParams({
-        subscription_id: id,
-        mode: params.mode,
-        format: params.format,
-        valid_only: String(params.valid_only),
-      });
-      return request(baseUrl, `/subscriptions/enhanced?${query.toString()}`);
-    },
+    getEnhanced: (id, params) => request(baseUrl, enhancedPath(id, params)),
     getSettings: () => request(baseUrl, "/settings"),
     getSettingsMetadata: () => request(baseUrl, "/settings/metadata"),
     updateSettings: (input) =>
@@ -180,14 +172,19 @@ export function createApiClient(baseUrl: string): ApiClient {
   };
 }
 
-export function enhancedUrl(baseUrl: string, id: string, params: { mode: ExportMode; format: ExportFormat; valid_only: boolean }): string {
-  const query = new URLSearchParams({
-    subscription_id: id,
-    mode: params.mode,
-    format: params.format,
-    valid_only: String(params.valid_only),
-  });
-  return joinUrl(baseUrl, `/subscriptions/enhanced?${query.toString()}`);
+function enhancedPath(id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number }): string {
+  const query = new URLSearchParams();
+  const ids = Array.isArray(id) ? id : [id];
+  ids.forEach((subscriptionId) => query.append("subscription_id", subscriptionId));
+  query.append("mode", params.mode);
+  query.append("format", params.format);
+  query.append("valid_only", String(params.valid_only));
+  if (params.limit !== undefined) query.append("limit", String(params.limit));
+  return `/subscriptions/enhanced?${query.toString()}`;
+}
+
+export function enhancedUrl(baseUrl: string, id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number }): string {
+  return joinUrl(baseUrl, enhancedPath(id, params));
 }
 
 export function singboxUrl(

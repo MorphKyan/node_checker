@@ -98,6 +98,7 @@ export interface RuntimeSettings {
   SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH: number;
   TTFB_TARGET_URL: string;
   SPEEDTEST_URL: string;
+  PROXY_CORE: string;
 }
 
 export interface RuntimeSettingMetadata {

@@ -1,11 +1,15 @@
-version: '3.8'
-
 services:
   node-checker:
     build: .
     container_name: node-checker
-    ports:
-      - "8000:8000"
+    networks:
+      br0:
+        ipv4_address: 192.168.1.10
     volumes:
-      - ./data:/app/data
+      - /mnt/cache/appdata/node-checker:/app/data
     restart: unless-stopped
+
+networks:
+  br0:
+    name: br0
+    external: true

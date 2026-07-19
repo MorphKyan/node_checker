@@ -68,7 +68,10 @@ def restore_tested_nodes(data: list[dict]) -> list[TestedNode]:
     restored = []
     for item in data:
         analyzed_data = item["analyzed_node"]
-        node = VlessNode(**analyzed_data["node"])
+        node_data = dict(analyzed_data["node"])
+        node_data.setdefault("alpn", "")
+        node_data.setdefault("mode", "")
+        node = VlessNode(**node_data)
         probe = restore_probe_data(analyzed_data["probe"])
         analyzed = AnalyzedNode(
             node=node,

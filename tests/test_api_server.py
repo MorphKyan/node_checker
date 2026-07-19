@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from api_server import app
 from models import AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode
 from module_api_store import ApiStore
+from module_profile import DISPLAY_LABELS
 from module_subscription_service import SubscriptionRefreshService
 from settings import settings
 
@@ -320,6 +321,41 @@ class ApiServerTests(unittest.TestCase):
         self.assertIn("vless://", response.text)
         self.assertIn("Example%20ASN", response.text)
 
+    def test_single_enhanced_defaults_to_base64_subscription(self):
+        subscription = self.create_subscription_without_refresh()
+        self.save_result(subscription["id"])
+
+        response = self.client.get(f"/subscriptions/{subscription['id']}/enhanced")
+
+        self.assertEqual(response.status_code, 200)
+        decoded = base64.b64decode(response.text).decode("utf-8")
+        self.assertIn("vless://", decoded)
+        self.assertIn("JP", decoded)
+
+    def test_single_enhanced_supports_plain_detailed(self):
+        subscription = self.create_subscription_without_refresh()
+        self.save_result(subscription["id"])
+
+        response = self.client.get(
+            f"/subscriptions/{subscription['id']}/enhanced?format=plain&mode=detailed"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("vless://", response.text)
+        self.assertIn("Example%20ASN", response.text)
+
+    def test_single_enhanced_missing_subscription_returns_404(self):
+        response = self.client.get("/subscriptions/sub_missing/enhanced")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_single_enhanced_missing_result_returns_409(self):
+        subscription = self.create_subscription_without_refresh()
+
+        response = self.client.get(f"/subscriptions/{subscription['id']}/enhanced")
+
+        self.assertEqual(response.status_code, 409)
+
     def test_results_return_latest_node_details(self):
         subscription = self.create_subscription_without_refresh()
         self.save_result(subscription["id"])
@@ -416,6 +452,92 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(len(lines_limit), 1)
         self.assertIn("H1", lines_limit[0])
 
+    def test_enhanced_filter_parameters_match_both_routes(self):
+        sub = self.create_subscription_without_refresh()
+
+        node_keep = make_tested_node(valid=True)
+        node_keep.analyzed_node.node.raw_uri = "vless://uuid_keep@example.com:443?security=tls#Keep"
+        node_keep.analyzed_node.node.uuid = "uuid_keep"
+        node_keep.analyzed_node.node.remark = "Keep"
+        node_keep.analyzed_node.probe.actual_geo = "JP"
+        node_keep.analyzed_node.probe.ttfb_ms = 210.0
+        node_keep.analyzed_node.probe.profile.network_labels = [LabelEvidence("datacenter", 0.9)]
+        node_keep.analyzed_node.probe.profile.risk_labels = [LabelEvidence("clean", 0.9)]
+
+        node_excluded_type = make_tested_node(valid=True)
+        node_excluded_type.analyzed_node.node.raw_uri = "vless://uuid_proxy@example.com:443?security=tls#Proxy"
+        node_excluded_type.analyzed_node.node.uuid = "uuid_proxy"
+        node_excluded_type.analyzed_node.node.remark = "Proxy"
+        node_excluded_type.analyzed_node.probe.actual_geo = "US"
+        node_excluded_type.analyzed_node.probe.ttfb_ms = 180.0
+        node_excluded_type.analyzed_node.probe.profile.network_labels = [LabelEvidence("datacenter", 0.9)]
+        node_excluded_type.analyzed_node.probe.profile.risk_labels = [LabelEvidence("proxy", 0.9)]
+
+        node_excluded_network = make_tested_node(valid=True)
+        node_excluded_network.analyzed_node.node.raw_uri = "vless://uuid_mobile@example.com:443?security=tls#Mobile"
+        node_excluded_network.analyzed_node.node.uuid = "uuid_mobile"
+        node_excluded_network.analyzed_node.node.remark = "Mobile"
+        node_excluded_network.analyzed_node.probe.actual_geo = "US"
+        node_excluded_network.analyzed_node.probe.ttfb_ms = 170.0
+        node_excluded_network.analyzed_node.probe.profile.network_labels = [LabelEvidence("mobile", 0.9)]
+        node_excluded_network.analyzed_node.probe.profile.risk_labels = [LabelEvidence("clean", 0.9)]
+
+        node_excluded_ttfb = make_tested_node(valid=True)
+        node_excluded_ttfb.analyzed_node.node.raw_uri = "vless://uuid_slow@example.com:443?security=tls#Slow"
+        node_excluded_ttfb.analyzed_node.node.uuid = "uuid_slow"
+        node_excluded_ttfb.analyzed_node.node.remark = "Slow"
+        node_excluded_ttfb.analyzed_node.probe.actual_geo = "JP"
+        node_excluded_ttfb.analyzed_node.probe.ttfb_ms = 400.0
+        node_excluded_ttfb.analyzed_node.probe.profile.network_labels = [LabelEvidence("datacenter", 0.9)]
+        node_excluded_ttfb.analyzed_node.probe.profile.risk_labels = [LabelEvidence("clean", 0.9)]
+
+        node_missing_ttfb = make_tested_node(valid=True)
+        node_missing_ttfb.analyzed_node.node.raw_uri = "vless://uuid_missing@example.com:443?security=tls#Missing"
+        node_missing_ttfb.analyzed_node.node.uuid = "uuid_missing"
+        node_missing_ttfb.analyzed_node.node.remark = "Missing"
+        node_missing_ttfb.analyzed_node.probe.actual_geo = "JP"
+        node_missing_ttfb.analyzed_node.probe.ttfb_ms = None
+        node_missing_ttfb.analyzed_node.probe.profile.network_labels = [LabelEvidence("datacenter", 0.9)]
+        node_missing_ttfb.analyzed_node.probe.profile.risk_labels = [LabelEvidence("clean", 0.9)]
+
+        self.save_result(
+            sub["id"],
+            [
+                node_keep,
+                node_excluded_type,
+                node_excluded_network,
+                node_excluded_ttfb,
+                node_missing_ttfb,
+            ],
+        )
+
+        common_params = [
+            ("format", "plain"),
+            ("mode", "detailed"),
+            ("geo", "jp,us"),
+            ("exclude_type", "Proxy"),
+            ("max_ttfb", "250"),
+        ]
+        aggregate_response = self.client.get(
+            "/subscriptions/enhanced",
+            params=[("subscription_id", sub["id"]), ("network", DISPLAY_LABELS["datacenter"]), *common_params],
+        )
+        single_response = self.client.get(
+            f"/subscriptions/{sub['id']}/enhanced",
+            params=[("network", "DATACENTER"), *common_params],
+        )
+
+        self.assertEqual(aggregate_response.status_code, 200)
+        self.assertEqual(single_response.status_code, 200)
+        self.assertEqual(aggregate_response.text, single_response.text)
+        lines = aggregate_response.text.strip().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn("uuid_keep", lines[0])
+        self.assertNotIn("uuid_proxy", aggregate_response.text)
+        self.assertNotIn("uuid_mobile", aggregate_response.text)
+        self.assertNotIn("uuid_slow", aggregate_response.text)
+        self.assertNotIn("uuid_missing", aggregate_response.text)
+
     def test_missing_result_returns_409(self):
         subscription = self.create_subscription_without_refresh()
 
@@ -428,6 +550,57 @@ class ApiServerTests(unittest.TestCase):
     def test_missing_resources_return_404(self):
         self.assertEqual(self.client.get("/subscriptions/sub_missing/results").status_code, 404)
         self.assertEqual(self.client.get("/jobs/job_missing").status_code, 404)
+
+    def test_create_singbox_template_accepts_commented_json_object(self):
+        content = """
+        {
+            // comments are allowed in saved templates
+            "log": { "level": "info" },
+            /* no outbounds required for lightweight validation */
+            "dns": {}
+        }
+        """
+
+        response = self.client.post(
+            "/singbox/templates",
+            json={"name": "default", "content": content},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["name"], "default")
+        self.assertEqual(payload["content"], content)
+
+    def test_create_singbox_template_rejects_invalid_json(self):
+        response = self.client.post(
+            "/singbox/templates",
+            json={"name": "broken", "content": '{ "log": }'},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Invalid Sing-box template content", response.json()["detail"])
+        self.assertIn("Failed to parse template JSON", response.json()["detail"])
+
+    def test_update_singbox_template_validates_content_only_when_present(self):
+        template = self.client.post(
+            "/singbox/templates",
+            json={"name": "default", "content": '{"log": {"level": "info"}}'},
+        ).json()
+
+        rename_response = self.client.patch(
+            f"/singbox/templates/{template['id']}",
+            json={"name": "renamed"},
+        )
+        self.assertEqual(rename_response.status_code, 200)
+        self.assertEqual(rename_response.json()["name"], "renamed")
+
+        bad_content_response = self.client.patch(
+            f"/singbox/templates/{template['id']}",
+            json={"content": "[]"},
+        )
+
+        self.assertEqual(bad_content_response.status_code, 422)
+        self.assertIn("Template must be a JSON object", bad_content_response.json()["detail"])
 
     def test_settings_can_be_read_and_updated(self):
         get_response = self.client.get("/settings")

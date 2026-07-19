@@ -12,12 +12,14 @@ class VlessNode:
     flow: str = ""
     security: str = "" # none, tls, reality
     sni: str = ""
+    alpn: str = ""
     fp: str = ""
     pbk: str = ""
     sid: str = ""
     type: str = "tcp" # network type: tcp, ws, grpc, etc.
     path: str = ""
     host: str = ""
+    mode: str = ""
 
 @dataclass
 class LabelEvidence:
@@ -75,5 +77,7 @@ class AnalyzedNode:
 
 @dataclass
 class TestedNode:
+    __test__ = False
+
     analyzed_node: AnalyzedNode
     download_speed_mbps: float

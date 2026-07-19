@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   BarChart3,
+  ChevronDown,
   Clipboard,
   Download,
   ExternalLink,
@@ -71,7 +72,29 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
 const chartColors = ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#64748b"];
 
 async function copyText(text: string): Promise<void> {
-  await navigator.clipboard?.writeText(text);
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (e) {
+      console.warn("Failed to copy using clipboard API, trying fallback:", e);
+    }
+  }
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.style.top = "0";
+  textArea.style.left = "0";
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  try {
+    document.execCommand("copy");
+  } catch (err) {
+    console.error("Fallback copy failed:", err);
+  }
+  document.body.removeChild(textArea);
 }
 
 function downloadText(filename: string, text: string): void {
@@ -391,7 +414,10 @@ export default function App() {
               networkOptions={networkOptions}
               typeOptions={typeOptions}
               filters={{ nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, maxRisk, maxTtfb, minSpeed, detourFilter, backboneFilter }}
-              onSelectSubscription={setSelectedSubscriptionId}
+              onSelectSubscription={(id) => {
+                setPage(1);
+                setSelectedSubscriptionId(id);
+              }}
               onFilters={(next) => {
                 setPage(1);
                 if (next.nodeSearch !== undefined) setNodeSearch(next.nodeSearch);
@@ -687,6 +713,17 @@ export function NodesView(props: {
   onDetails: (node: NodeResult) => void;
 }) {
   const [copiedKey, setCopiedKey] = useState("");
+  const [activeCopyDropdown, setActiveCopyDropdown] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleOutsideClick() {
+      setActiveCopyDropdown(null);
+    }
+    window.addEventListener("click", handleOutsideClick);
+    return () => {
+      window.removeEventListener("click", handleOutsideClick);
+    };
+  }, []);
 
   async function copyNodeUri(key: string, uri: string) {
     await copyText(uri);
@@ -737,12 +774,12 @@ export function NodesView(props: {
                 </tr>
               </thead>
               <tbody>
-                {props.pagedNodes.map((node) => {
+                {props.pagedNodes.map((node, index) => {
                   const rawKey = `${node.fingerprint}:raw`;
                   const compactKey = `${node.fingerprint}:compact`;
                   const detailedKey = `${node.fingerprint}:detailed`;
                   return (
-                    <tr key={node.fingerprint} className="border-t border-border">
+                    <tr key={`${node.fingerprint}-${index}`} className="border-t border-border">
                       {(props.result?.api_sites_snapshot || []).map((site) => {
                         const verdictForSite = node.probe.evidence.find((item) => item.site_id === site.id);
                         if (!verdictForSite) return <td key={site.id} className="px-3 py-3 text-slate-400">无数据</td>;
@@ -760,11 +797,54 @@ export function NodesView(props: {
                       <td className="px-3 py-3">{node.probe.ttfb_ms.toFixed(0)}</td>
                       <td className="px-3 py-3">{node.download_speed_mbps === null ? (node.speedtest_status === "failed" ? "失败" : "未测速") : node.download_speed_mbps.toFixed(2)}</td>
                       <td className="max-w-xs truncate px-3 py-3">{node.probe.asn_org}</td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 relative">
                         <div className="flex gap-2">
-                          <Button variant="ghost" onClick={() => void copyNodeUri(rawKey, node.raw_uri)}>{copiedKey === rawKey ? "已复制" : "原始"}</Button>
-                          <Button variant="ghost" onClick={() => void copyNodeUri(compactKey, node.compact_uri)}>{copiedKey === compactKey ? "已复制" : "compact"}</Button>
-                          <Button variant="ghost" onClick={() => void copyNodeUri(detailedKey, node.detailed_uri)}>{copiedKey === detailedKey ? "已复制" : "detailed"}</Button>
+                          <div className="relative inline-block text-left">
+                            <Button
+                              variant="ghost"
+                              onClick={(e) => {
+                                e.nativeEvent.stopImmediatePropagation();
+                                setActiveCopyDropdown(activeCopyDropdown === node.fingerprint ? null : node.fingerprint);
+                              }}
+                              className="flex items-center gap-1"
+                            >
+                              {copiedKey && copiedKey.startsWith(node.fingerprint) ? "已复制" : "复制"}
+                              <ChevronDown className="h-4 w-4 text-slate-400" />
+                            </Button>
+                            {activeCopyDropdown === node.fingerprint && (
+                              <div className="absolute right-0 mt-1 w-32 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-20 border border-slate-200 divide-y divide-slate-100">
+                                <div className="py-1">
+                                  <button
+                                    onClick={() => {
+                                      void copyNodeUri(rawKey, node.raw_uri);
+                                      setActiveCopyDropdown(null);
+                                    }}
+                                    className="block w-full px-4 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 font-medium"
+                                  >
+                                    原始链接
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      void copyNodeUri(compactKey, node.compact_uri);
+                                      setActiveCopyDropdown(null);
+                                    }}
+                                    className="block w-full px-4 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 font-medium"
+                                  >
+                                    紧凑 (compact)
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      void copyNodeUri(detailedKey, node.detailed_uri);
+                                      setActiveCopyDropdown(null);
+                                    }}
+                                    className="block w-full px-4 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 font-medium"
+                                  >
+                                    详细 (detailed)
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                           <Button variant="secondary" onClick={() => props.onDetails(node)}>详情</Button>
                         </div>
                       </td>

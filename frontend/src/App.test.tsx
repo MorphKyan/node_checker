@@ -243,8 +243,8 @@ describe("App", () => {
     const result: SubscriptionResults = { subscription_id: "sub", status: "completed", subscription_status: "completed", node_count: 1, valid_count: 1, updated_at: 1, nodes: [node], api_sites_snapshot: [{ id: "one", column_name: "One", provider: "ipwhois", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 0, api_key_configured: false }, { id: "two", column_name: "Two", provider: "ipapi", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 1, api_key_configured: false }] };
     render(<NodesView subscriptions={[]} selectedId="sub" result={result} filteredNodes={[node]} pagedNodes={[node]} page={1} totalPages={1} pageSize={20} geoOptions={[]} networkOptions={[]} typeOptions={[]} filters={{ nodeSearch: "", nodeValidity: "all", nodeGeo: "all", nodeNetwork: "all", nodeType: "all", maxRisk: "", maxTtfb: "", minSpeed: "", detourFilter: "all", backboneFilter: "all" }} onSelectSubscription={() => {}} onFilters={() => {}} onPage={() => {}} onDetails={() => {}} />);
     const headers = screen.getAllByRole("columnheader").map((header) => header.textContent);
-    expect(headers.slice(0, 2)).toEqual(["One", "Two"]);
+    expect(headers.slice(9, 11)).toEqual(["One", "Two"]);
     const cells = screen.getAllByRole("cell").map((cell) => cell.textContent);
-    expect(cells.slice(0, 2)).toEqual(["-风险 12", "timeout"]);
+    expect(cells.slice(9, 11)).toEqual(["-风险 12", "timeout"]);
   });
 });

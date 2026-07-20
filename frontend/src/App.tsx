@@ -769,8 +769,17 @@ export function NodesView(props: {
             <table className="w-full min-w-[1280px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
+                  <th className="px-3 py-2">原始名称</th>
+                  <th className="px-3 py-2">状态</th>
+                  <th className="px-3 py-2">地区</th>
+                  <th className="px-3 py-2">Ping</th>
+                  <th className="px-3 py-2">TTFB</th>
+                  <th className="px-3 py-2">增强名称</th>
+                  <th className="px-3 py-2">风险</th>
+                  <th className="px-3 py-2">测速</th>
+                  <th className="px-3 py-2">ASN</th>
                   {(props.result?.api_sites_snapshot || []).map((site) => <th key={site.id} className="px-3 py-2">{site.column_name}</th>)}
-                  <th className="px-3 py-2">状态</th><th className="px-3 py-2">增强名称</th><th className="px-3 py-2">地区</th><th className="px-3 py-2">网络</th><th className="px-3 py-2">类型</th><th className="px-3 py-2">风险</th><th className="px-3 py-2">Ping</th><th className="px-3 py-2">TTFB</th><th className="px-3 py-2">测速</th><th className="px-3 py-2">ASN</th><th className="px-3 py-2">操作</th>
+                  <th className="px-3 py-2">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -780,6 +789,15 @@ export function NodesView(props: {
                   const detailedKey = `${node.fingerprint}:detailed`;
                   return (
                     <tr key={`${node.fingerprint}-${index}`} className="border-t border-border">
+                      <td className="max-w-xs truncate px-3 py-3 font-medium" title={node.original_name}>{node.original_name}</td>
+                      <td className="px-3 py-3"><Badge tone={node.is_valid ? "green" : "red"}>{node.is_valid ? "有效" : "失败"}</Badge></td>
+                      <td className="px-3 py-3">{node.probe.actual_geo}</td>
+                      <td className="px-3 py-3">{node.probe.tcp_ping_ms.toFixed(0)}</td>
+                      <td className="px-3 py-3">{node.probe.ttfb_ms.toFixed(0)}</td>
+                      <td className="max-w-xs truncate px-3 py-3">{node.enhanced_name_compact}</td>
+                      <td className="px-3 py-3">{node.probe.risk_score === null ? "未知" : node.probe.risk_score.toFixed(1)}</td>
+                      <td className="px-3 py-3">{node.download_speed_mbps === null ? (node.speedtest_status === "failed" ? "失败" : "未测速") : node.download_speed_mbps.toFixed(2)}</td>
+                      <td className="max-w-xs truncate px-3 py-3" title={node.probe.asn_org}>{node.probe.asn_org}</td>
                       {(props.result?.api_sites_snapshot || []).map((site) => {
                         const verdictForSite = node.probe.evidence.find((item) => item.site_id === site.id);
                         if (!verdictForSite) return <td key={site.id} className="px-3 py-3 text-slate-400">无数据</td>;
@@ -787,16 +805,6 @@ export function NodesView(props: {
                         const labels = [...verdictForSite.network_labels, ...verdictForSite.risk_labels].map((label) => label.display).join("/");
                         return <td key={site.id} className="px-3 py-3">{labels || "-"}<br />{verdictForSite.risk_score === null ? "风险未知" : `风险 ${verdictForSite.risk_score.toFixed(0)}`}</td>;
                       })}
-                      <td className="px-3 py-3"><Badge tone={node.is_valid ? "green" : "red"}>{node.is_valid ? "有效" : "失败"}</Badge></td>
-                      <td className="max-w-xs truncate px-3 py-3 font-medium">{node.enhanced_name_compact}</td>
-                      <td className="px-3 py-3">{node.probe.actual_geo}</td>
-                      <td className="px-3 py-3">{node.probe.network_labels.join("/") || "-"}</td>
-                      <td className="px-3 py-3">{node.probe.type_labels.join("/") || "-"}</td>
-                      <td className="px-3 py-3">{node.probe.risk_score === null ? "未知" : node.probe.risk_score.toFixed(1)}</td>
-                      <td className="px-3 py-3">{node.probe.tcp_ping_ms.toFixed(0)}</td>
-                      <td className="px-3 py-3">{node.probe.ttfb_ms.toFixed(0)}</td>
-                      <td className="px-3 py-3">{node.download_speed_mbps === null ? (node.speedtest_status === "failed" ? "失败" : "未测速") : node.download_speed_mbps.toFixed(2)}</td>
-                      <td className="max-w-xs truncate px-3 py-3">{node.probe.asn_org}</td>
                       <td className="px-3 py-3 relative">
                         <div className="flex gap-2">
                           <div className="relative inline-block text-left">
@@ -1027,9 +1035,9 @@ function detectConflicts(evidence: ApiVerdict[], actualGeo: string): ConflictInf
   if (hasResidential && hasDatacenter) {
     conflicts.push({
       type: "network",
-      description: `网络属性冲突：部分数据源判定为家宽/商宽/移动网络 [${resSources.join(
+      description: `属性冲突：部分数据源判定为家宽/商宽/移动网络 [${resSources.join(
         ", "
-      )}]，而其他判定为机房/托管 [${dcSources.join(", ")}]。`,
+      )}]，而其他判定为机房 [${dcSources.join(", ")}]。`,
     });
   }
 
@@ -1153,7 +1161,7 @@ function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }
                     <div className="space-y-1.5">
                       {verdict.network_labels && verdict.network_labels.length > 0 && (
                         <div className="flex items-start gap-1 flex-wrap">
-                          <span className="text-slate-400 font-medium shrink-0">网络属性:</span>
+                          <span className="text-slate-400 font-medium shrink-0">属性:</span>
                           {verdict.network_labels.map((lbl) => (
                             <span key={lbl.label} className="inline-flex items-center bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded text-[10px] font-medium">
                               {lbl.display} ({(lbl.confidence * 100).toFixed(0)}%)
@@ -1164,7 +1172,7 @@ function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }
 
                       {verdict.risk_labels && verdict.risk_labels.length > 0 && (
                         <div className="flex items-start gap-1 flex-wrap">
-                          <span className="text-slate-400 font-medium shrink-0">信誉评级:</span>
+                          <span className="text-slate-400 font-medium shrink-0">信誉:</span>
                           {verdict.risk_labels.map((lbl) => (
                             <span key={lbl.label} className={`inline-flex items-center border px-1.5 py-0.5 rounded text-[10px] font-medium ${
                               lbl.label === 'clean' 

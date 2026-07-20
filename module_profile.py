@@ -27,22 +27,22 @@ RISK_LABELS = {
 
 DISPLAY_LABELS = {
     "residential": "家宽",
-    "likely_residential": "疑似家宽",
+    "likely_residential": "家宽",
     "mobile": "移动网络",
     "business": "商宽",
     "datacenter": "机房",
-    "hosting": "托管机房",
+    "hosting": "机房",
     "clean": "Clean",
     "vpn": "VPN",
     "proxy": "Proxy",
     "tor": "Tor",
-    "abuser": "滥用",
+    "abuser": "Abuse",
     "unknown": "未知",
 }
 
 RISK_BY_LABEL = {
-    "clean": 10.0,
-    "hosting": 35.0,
+    "clean": 0.0,
+    "hosting": 40.0,
     "datacenter": 40.0,
     "vpn": 70.0,
     "proxy": 80.0,

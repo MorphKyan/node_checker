@@ -143,7 +143,7 @@ class NodeProfileAggregatorTests(unittest.TestCase):
             }),
         ])
 
-        self.assertEqual(profile.display_labels, ["托管机房", "Proxy"])
+        self.assertEqual(profile.display_labels, ["机房", "Proxy"])
 
     def test_clean_only_does_not_become_residential(self):
         profile = NodeProfileAggregator.aggregate([
@@ -173,8 +173,7 @@ class NodeProfileAggregatorTests(unittest.TestCase):
             }),
         ])
 
-        self.assertIn("疑似家宽", profile.display_labels)
-        self.assertNotIn("家宽", profile.display_labels)
+        self.assertIn("家宽", profile.display_labels)
 
     def test_no_successful_evidence_is_unknown(self):
         profile = NodeProfileAggregator.aggregate([
@@ -259,7 +258,7 @@ class ProfileExportIntegrationTests(unittest.TestCase):
         detail = next(Path(base_dir, "node_details").glob("*.md")).read_text(encoding="utf-8")
 
         self.assertIn("Profile", report)
-        self.assertIn("托管机房/Proxy", report)
+        self.assertIn("机房/Proxy", report)
         self.assertIn("### Node Profile", detail)
         self.assertIn("ipwho.is: hosting=true, proxy=true", detail)
 

@@ -2,11 +2,11 @@ import asyncio
 import os
 import socket
 
-from models import AnalyzedNode, ProbeData, TestedNode, VlessNode
+from models import AnalyzedNode, ProbeData, TestedNode, ProxyNode, VlessNode
 from module_analyzer import NodeAnalyzer
 from module_api_store import ApiStore
 from module_cache import ProbeCache
-from module_parser import VlessParser
+from module_parser import NodeParser, VlessParser
 from module_probe import LightweightProbe
 from module_setup import setup_singbox, setup_xray
 from module_tunnel import TunnelController
@@ -57,8 +57,8 @@ class SubscriptionRefreshService:
 
     @staticmethod
     async def fetch_subscription_text(source: str) -> str:
-        if VlessParser.is_http_source(source):
-            return await VlessParser.fetch_subscription(source)
+        if NodeParser.is_http_source(source):
+            return await NodeParser.fetch_subscription(source)
         if os.path.exists(source):
             max_bytes = max(1, int(settings.SUBSCRIPTION_MAX_M)) * 1024 * 1024
             if os.path.getsize(source) > max_bytes:
@@ -66,13 +66,13 @@ class SubscriptionRefreshService:
             with open(source, "r", encoding="utf-8") as f:
                 raw_text = f.read().strip()
             if raw_text.startswith("http") and "\n" not in raw_text:
-                return await VlessParser.fetch_subscription(raw_text)
+                return await NodeParser.fetch_subscription(raw_text)
             return raw_text
         raise FileNotFoundError(f"Subscription source not found: {source}")
 
     @staticmethod
     async def process_node_filter(
-        node: VlessNode,
+        node: ProxyNode,
         sem: asyncio.Semaphore,
         *,
         force_probe: bool = False,

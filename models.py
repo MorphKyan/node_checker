@@ -1,13 +1,18 @@
 from dataclasses import dataclass, field
 
 @dataclass
-class VlessNode:
+class ProxyNode:
     raw_uri: str
-    uuid: str
     server_ip: str
     server_port: int
     remark: str
     expected_geo: str
+    protocol: str = "vless"
+
+@dataclass
+class VlessNode(ProxyNode):
+    uuid: str = ""
+    protocol: str = "vless"
     # Vless 额外参数
     flow: str = ""
     security: str = "" # none, tls, reality
@@ -20,6 +25,18 @@ class VlessNode:
     path: str = ""
     host: str = ""
     mode: str = ""
+
+@dataclass
+class Hy2Node(ProxyNode):
+    password: str = ""
+    protocol: str = "hy2"
+    sni: str = ""
+    insecure: bool = False
+    obfs: str = ""
+    obfs_password: str = ""
+    up_mbps: int | None = None
+    down_mbps: int | None = None
+    ports: str = ""
 
 @dataclass
 class LabelEvidence:
@@ -62,7 +79,7 @@ class ProbeData:
 
 @dataclass
 class AnalyzedNode:
-    node: VlessNode
+    node: ProxyNode
     probe: ProbeData
     is_valid: bool
     reject_reason: str = ""

@@ -1,6 +1,6 @@
 import base64
 import urllib.parse
-from models import VlessNode
+from models import ProxyNode, VlessNode, Hy2Node
 import aiohttp
 from settings import settings
 
@@ -15,7 +15,7 @@ GEO_MAP = {
     "de": "DE", "德国": "DE", "germany": "DE", "法兰克福": "DE",
 }
 
-class VlessParser:
+class NodeParser:
     @staticmethod
     def is_http_source(source: str) -> bool:
         scheme = urllib.parse.urlparse(source).scheme.lower()
@@ -53,78 +53,149 @@ class VlessParser:
                 return b"".join(chunks).decode(encoding)
 
     @staticmethod
-    def parse_nodes(raw_text: str) -> list[VlessNode]:
+    def _match_geo(remark: str) -> str:
+        remark_lower = remark.lower()
+        for key, geo in GEO_MAP.items():
+            if key in remark_lower:
+                return geo
+        return "Unknown"
+
+    @staticmethod
+    def parse_vless_line(line: str) -> VlessNode:
+        main_part, *remark_part = line.split('#', 1)
+        remark = urllib.parse.unquote(remark_part[0]) if remark_part else ""
+        
+        uri_str = main_part[len("vless://"):]
+        creds, server_port_params = uri_str.split('@', 1)
+        uuid = creds
+        
+        if '?' in server_port_params:
+            server_port_str, params_str = server_port_params.split('?', 1)
+        else:
+            server_port_str = server_port_params
+            params_str = ""
+            
+        parsed_server = urllib.parse.urlsplit(f"//{server_port_str}")
+        server_ip = parsed_server.hostname
+        server_port = parsed_server.port
+        if not server_ip or server_port is None:
+            raise ValueError("Missing server host or port")
+        
+        params = dict(urllib.parse.parse_qsl(params_str))
+        transport_type = params.get("type", "tcp")
+        transport_path = (
+            params.get("serviceName") or params.get("path", "")
+            if transport_type == "grpc"
+            else params.get("path", "")
+        )
+        
+        expected_geo = NodeParser._match_geo(remark)
+                
+        return VlessNode(
+            raw_uri=line,
+            uuid=uuid,
+            server_ip=server_ip,
+            server_port=server_port,
+            remark=remark,
+            expected_geo=expected_geo,
+            protocol="vless",
+            flow=params.get("flow", ""),
+            security=params.get("security", ""),
+            sni=params.get("sni", ""),
+            alpn=params.get("alpn", ""),
+            fp=params.get("fp", ""),
+            pbk=params.get("pbk", ""),
+            sid=params.get("sid", ""),
+            type=transport_type,
+            path=transport_path,
+            host=params.get("host", ""),
+            mode=params.get("mode", "")
+        )
+
+    @staticmethod
+    def parse_hy2_line(line: str) -> Hy2Node:
+        main_part, *remark_part = line.split('#', 1)
+        remark = urllib.parse.unquote(remark_part[0]) if remark_part else ""
+        
+        if main_part.startswith("hysteria2://"):
+            uri_str = main_part[len("hysteria2://"):]
+        else:
+            uri_str = main_part[len("hy2://"):]
+
+        creds, server_port_params = uri_str.split('@', 1)
+        password = urllib.parse.unquote(creds)
+
+        if '?' in server_port_params:
+            server_port_str, params_str = server_port_params.split('?', 1)
+        else:
+            server_port_str = server_port_params
+            params_str = ""
+
+        parsed_server = urllib.parse.urlsplit(f"//{server_port_str}")
+        server_ip = parsed_server.hostname
+        server_port = parsed_server.port
+        if not server_ip or server_port is None:
+            raise ValueError("Missing server host or port")
+
+        params = dict(urllib.parse.parse_qsl(params_str))
+        sni = params.get("sni") or params.get("peer") or ""
+        insecure_raw = params.get("insecure") or params.get("allow_insecure") or params.get("allowInsecure") or "0"
+        insecure = str(insecure_raw).lower() in {"1", "true", "yes"}
+        obfs = params.get("obfs", "")
+        obfs_password = params.get("obfs-password") or params.get("obfs_password") or ""
+        
+        up_val = params.get("up") or params.get("up_mbps")
+        up_mbps = int(up_val) if up_val and str(up_val).isdigit() else None
+        
+        down_val = params.get("down") or params.get("down_mbps")
+        down_mbps = int(down_val) if down_val and str(down_val).isdigit() else None
+
+        expected_geo = NodeParser._match_geo(remark)
+
+        return Hy2Node(
+            raw_uri=line,
+            password=password,
+            server_ip=server_ip,
+            server_port=server_port,
+            remark=remark,
+            expected_geo=expected_geo,
+            protocol="hy2",
+            sni=sni,
+            insecure=insecure,
+            obfs=obfs,
+            obfs_password=obfs_password,
+            up_mbps=up_mbps,
+            down_mbps=down_mbps,
+            ports=params.get("ports", "")
+        )
+
+    @staticmethod
+    def parse_nodes(raw_text: str) -> list[ProxyNode]:
         raw_text = raw_text.strip()
-        padding = 4 - (len(raw_text) % 4)
+        padded_text = raw_text
+        padding = 4 - (len(padded_text) % 4)
         if padding != 4:
-            raw_text += "=" * padding
+            padded_text += "=" * padding
             
         try:
-            decoded = base64.b64decode(raw_text).decode('utf-8')
+            decoded = base64.b64decode(padded_text).decode('utf-8')
         except Exception:
             decoded = raw_text
 
         nodes = []
         for line in decoded.splitlines():
             line = line.strip()
-            if not line.startswith("vless://"):
-                continue
-            
-            try:
-                main_part, *remark_part = line.split('#', 1)
-                remark = urllib.parse.unquote(remark_part[0]) if remark_part else ""
-                
-                uri_str = main_part[len("vless://"):]
-                creds, server_port_params = uri_str.split('@', 1)
-                uuid = creds
-                
-                if '?' in server_port_params:
-                    server_port_str, params_str = server_port_params.split('?', 1)
-                else:
-                    server_port_str = server_port_params
-                    params_str = ""
-                    
-                parsed_server = urllib.parse.urlsplit(f"//{server_port_str}")
-                server_ip = parsed_server.hostname
-                server_port = parsed_server.port
-                if not server_ip or server_port is None:
-                    raise ValueError("Missing server host or port")
-                
-                params = dict(urllib.parse.parse_qsl(params_str))
-                transport_type = params.get("type", "tcp")
-                transport_path = (
-                    params.get("serviceName") or params.get("path", "")
-                    if transport_type == "grpc"
-                    else params.get("path", "")
-                )
-                
-                expected_geo = "Unknown"
-                remark_lower = remark.lower()
-                for key, geo in GEO_MAP.items():
-                    if key in remark_lower:
-                        expected_geo = geo
-                        break
-                        
-                nodes.append(VlessNode(
-                    raw_uri=line,
-                    uuid=uuid,
-                    server_ip=server_ip,
-                    server_port=server_port,
-                    remark=remark,
-                    expected_geo=expected_geo,
-                    flow=params.get("flow", ""),
-                    security=params.get("security", ""),
-                    sni=params.get("sni", ""),
-                    alpn=params.get("alpn", ""),
-                    fp=params.get("fp", ""),
-                    pbk=params.get("pbk", ""),
-                    sid=params.get("sid", ""),
-                    type=transport_type,
-                    path=transport_path,
-                    host=params.get("host", ""),
-                    mode=params.get("mode", "")
-                ))
-            except Exception as e:
-                print(f"[Parser] Failed to parse line: {line[:30]}... Error: {e}")
+            if line.startswith("vless://"):
+                try:
+                    nodes.append(NodeParser.parse_vless_line(line))
+                except Exception as e:
+                    print(f"[Parser] Failed to parse VLESS line: {line[:30]}... Error: {e}")
+            elif line.startswith("hy2://") or line.startswith("hysteria2://"):
+                try:
+                    nodes.append(NodeParser.parse_hy2_line(line))
+                except Exception as e:
+                    print(f"[Parser] Failed to parse Hy2 line: {line[:30]}... Error: {e}")
                 
         return nodes
+
+VlessParser = NodeParser

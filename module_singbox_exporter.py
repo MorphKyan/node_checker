@@ -1,6 +1,6 @@
 import json
 import re
-from models import TestedNode
+from models import TestedNode, Hy2Node
 from module_subscription_exporter import SubscriptionExporter
 
 def strip_comments(json_str: str) -> str:
@@ -61,56 +61,83 @@ def generate_singbox_config(
     node_outbounds = []
     node_tags = []
     for node, tag in zip(sorted_nodes, remarks):
-        vless = node.analyzed_node.node
-        outbound = {
-            "type": "vless",
-            "tag": tag,
-            "server": vless.server_ip,
-            "server_port": vless.server_port,
-            "uuid": vless.uuid,
-        }
-        
-        if vless.flow:
-            outbound["flow"] = vless.flow
-
-        if vless.security in ["tls", "reality"]:
-            tls_config = {
-                "enabled": True,
-                "insecure": False,
-                "alpn": (
-                    [item for item in vless.alpn.split(",") if item]
-                    if vless.alpn
-                    else ["h2", "http/1.1"]
-                ),
-            }
-            if vless.sni:
-                tls_config["server_name"] = vless.sni
-            if vless.fp:
-                tls_config["utls"] = {
+        p_node = node.analyzed_node.node
+        if isinstance(p_node, Hy2Node) or getattr(p_node, "protocol", "vless") in {"hy2", "hysteria2"}:
+            outbound = {
+                "type": "hysteria2",
+                "tag": tag,
+                "server": p_node.server_ip,
+                "server_port": p_node.server_port,
+                "password": getattr(p_node, "password", ""),
+                "tls": {
                     "enabled": True,
-                    "fingerprint": vless.fp,
+                    "insecure": getattr(p_node, "insecure", False),
                 }
-            if vless.security == "reality":
-                reality_config = {"enabled": True}
-                if vless.pbk:
-                    reality_config["public_key"] = vless.pbk
-                if vless.sid:
-                    reality_config["short_id"] = vless.sid
-                tls_config["reality"] = reality_config
-            outbound["tls"] = tls_config
+            }
+            if getattr(p_node, "sni", ""):
+                outbound["tls"]["server_name"] = p_node.sni
+            if getattr(p_node, "obfs", ""):
+                outbound["obfs"] = {
+                    "type": p_node.obfs,
+                    "password": getattr(p_node, "obfs_password", "")
+                }
+            if getattr(p_node, "up_mbps", None) is not None:
+                outbound["up_mbps"] = p_node.up_mbps
+            if getattr(p_node, "down_mbps", None) is not None:
+                outbound["down_mbps"] = p_node.down_mbps
+        else:
+            vless = p_node
+            outbound = {
+                "type": "vless",
+                "tag": tag,
+                "server": vless.server_ip,
+                "server_port": vless.server_port,
+                "uuid": getattr(vless, "uuid", ""),
+            }
+            
+            if getattr(vless, "flow", ""):
+                outbound["flow"] = vless.flow
 
-        if vless.type == "ws":
-            transport = {"type": "ws"}
-            if vless.path:
-                transport["path"] = vless.path
-            if vless.host:
-                transport["headers"] = {"Host": vless.host}
-            outbound["transport"] = transport
-        elif vless.type == "grpc":
-            transport = {"type": "grpc"}
-            if vless.path:
-                transport["service_name"] = vless.path
-            outbound["transport"] = transport
+            security = getattr(vless, "security", "")
+            if security in ["tls", "reality"]:
+                tls_config = {
+                    "enabled": True,
+                    "insecure": False,
+                    "alpn": (
+                        [item for item in vless.alpn.split(",") if item]
+                        if getattr(vless, "alpn", "")
+                        else ["h2", "http/1.1"]
+                    ),
+                }
+                if getattr(vless, "sni", ""):
+                    tls_config["server_name"] = vless.sni
+                if getattr(vless, "fp", ""):
+                    tls_config["utls"] = {
+                        "enabled": True,
+                        "fingerprint": vless.fp,
+                    }
+                if security == "reality":
+                    reality_config = {"enabled": True}
+                    if getattr(vless, "pbk", ""):
+                        reality_config["public_key"] = vless.pbk
+                    if getattr(vless, "sid", ""):
+                        reality_config["short_id"] = vless.sid
+                    tls_config["reality"] = reality_config
+                outbound["tls"] = tls_config
+
+            vless_type = getattr(vless, "type", "tcp")
+            if vless_type == "ws":
+                transport = {"type": "ws"}
+                if getattr(vless, "path", ""):
+                    transport["path"] = vless.path
+                if getattr(vless, "host", ""):
+                    transport["headers"] = {"Host": vless.host}
+                outbound["transport"] = transport
+            elif vless_type == "grpc":
+                transport = {"type": "grpc"}
+                if getattr(vless, "path", ""):
+                    transport["service_name"] = vless.path
+                outbound["transport"] = transport
             
         node_outbounds.append(outbound)
         node_tags.append(tag)

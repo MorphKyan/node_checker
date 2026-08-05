@@ -9,7 +9,7 @@ from dataclasses import replace
 import aiohttp
 from aiohttp_socks import ProxyConnector
 
-from models import ApiVerdict, ProbeData, VlessNode
+from models import ApiVerdict, ProbeData, ProxyNode
 from module_profile import NodeProfileAggregator, ProfileAdapters
 from settings import settings
 
@@ -117,7 +117,7 @@ class LightweightProbe:
 
     @staticmethod
     async def run_probe(
-        node: VlessNode,
+        node: ProxyNode,
         socks5_url: str,
         api_sites: list[dict] | None = None,
         *,

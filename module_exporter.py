@@ -1,7 +1,7 @@
 import os
 import re
 import unicodedata
-from models import TestedNode
+from models import TestedNode, Hy2Node
 
 def get_visual_width(s: str) -> int:
     width = 0
@@ -111,15 +111,28 @@ class ResultExporter:
             safe_remark = f"{safe_remark}_{ip_suffix}"
             detail_path = os.path.join(details_dir, f"{safe_remark}.md")
             
+            node_protocol = getattr(an.node, "protocol", "vless").upper()
+            if isinstance(an.node, Hy2Node) or getattr(an.node, "protocol", "vless") in {"hy2", "hysteria2"}:
+                basic_info_block = f"""- **Protocol**: `{node_protocol}`
+- **Password**: `{getattr(an.node, "password", "")}`
+- **Server**: `{an.node.server_ip}:{an.node.server_port}`
+- **Expected Geo**: `{an.node.expected_geo}`
+- **SNI**: `{getattr(an.node, "sni", "")}`
+- **Insecure**: `{getattr(an.node, "insecure", False)}`
+- **Obfs**: `{getattr(an.node, "obfs", "") or "None"}`"""
+            else:
+                basic_info_block = f"""- **Protocol**: `{node_protocol}`
+- **UUID**: `{getattr(an.node, "uuid", "")}`
+- **Server**: `{an.node.server_ip}:{an.node.server_port}`
+- **Expected Geo**: `{an.node.expected_geo}`
+- **Security**: `{getattr(an.node, "security", "")}`
+- **Transport**: `{getattr(an.node, "type", "")}`
+- **SNI**: `{getattr(an.node, "sni", "")}`"""
+
             detail_content = f"""# Node Detail: {an.node.remark}
 
 ## 1. Basic Info
-- **UUID**: `{an.node.uuid}`
-- **Server**: `{an.node.server_ip}:{an.node.server_port}`
-- **Expected Geo**: `{an.node.expected_geo}`
-- **Security**: `{an.node.security}`
-- **Transport**: `{an.node.type}`
-- **SNI**: `{an.node.sni}`
+{basic_info_block}
 
 ## 2. Probe Results
 - **TCP Ping**: `{probe.tcp_ping_ms:.2f} ms`

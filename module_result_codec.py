@@ -1,7 +1,22 @@
 import json
 from dataclasses import asdict, fields
 
-from models import ApiVerdict, AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode
+from models import ApiVerdict, AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode, Hy2Node, ProxyNode
+
+
+def restore_proxy_node(node_data: dict) -> ProxyNode:
+    protocol = node_data.get("protocol", "")
+    raw_uri = node_data.get("raw_uri", "")
+    if protocol in {"hy2", "hysteria2"} or raw_uri.startswith("hy2://") or raw_uri.startswith("hysteria2://"):
+        allowed = {field.name for field in fields(Hy2Node)}
+        clean_data = {k: v for k, v in node_data.items() if k in allowed}
+        return Hy2Node(**clean_data)
+    else:
+        allowed = {field.name for field in fields(VlessNode)}
+        clean_data = {k: v for k, v in node_data.items() if k in allowed}
+        clean_data.setdefault("alpn", "")
+        clean_data.setdefault("mode", "")
+        return VlessNode(**clean_data)
 
 
 def _restore_label_evidence(items) -> list[LabelEvidence]:
@@ -72,9 +87,7 @@ def restore_tested_nodes(data: list[dict]) -> list[TestedNode]:
     for item in data:
         analyzed_data = item["analyzed_node"]
         node_data = dict(analyzed_data["node"])
-        node_data.setdefault("alpn", "")
-        node_data.setdefault("mode", "")
-        node = VlessNode(**node_data)
+        node = restore_proxy_node(node_data)
         probe = restore_probe_data(analyzed_data["probe"])
         analyzed = AnalyzedNode(
             node=node,

@@ -5,7 +5,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from models import ProbeData, VlessNode
+from models import ProbeData, ProxyNode, VlessNode
 from module_api_store import ApiStore
 from module_node_identity import make_node_fingerprint, make_node_identity
 from module_result_codec import restore_probe_data
@@ -16,11 +16,11 @@ class ProbeCache:
     _write_lock = asyncio.Lock()
 
     @staticmethod
-    def make_node_fingerprint(node: VlessNode) -> str:
+    def make_node_fingerprint(node: ProxyNode) -> str:
         return make_node_fingerprint(node)
 
     @staticmethod
-    def make_node_identity(node: VlessNode) -> str:
+    def make_node_identity(node: ProxyNode) -> str:
         return make_node_identity(node)
 
     @staticmethod
@@ -39,7 +39,7 @@ class ProbeCache:
         return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:20]
 
     @classmethod
-    def _path(cls, node: VlessNode, signature: str) -> Path:
+    def _path(cls, node: ProxyNode, signature: str) -> Path:
         key = hashlib.sha256(f"{cls.make_node_fingerprint(node)}:{signature}".encode()).hexdigest()
         return ApiStore.data_dir() / "probe-cache" / f"{key}.json"
 
@@ -48,7 +48,7 @@ class ProbeCache:
         (ApiStore.data_dir() / "probe-cache").mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    async def get(cls, node: VlessNode, api_sites=None, *, probe_config=None) -> ProbeData | None:
+    async def get(cls, node: ProxyNode, api_sites=None, *, probe_config=None) -> ProbeData | None:
         if not settings.CACHE_ENABLED: return None
         snapshot = cls.probe_config_snapshot(probe_config, api_sites)
         path = cls._path(node, cls.config_signature(probe_config=snapshot))
@@ -63,7 +63,7 @@ class ProbeCache:
             return None
 
     @classmethod
-    async def set(cls, node: VlessNode, probe_data: ProbeData, api_sites=None, *, probe_config=None) -> None:
+    async def set(cls, node: ProxyNode, probe_data: ProbeData, api_sites=None, *, probe_config=None) -> None:
         if not settings.CACHE_ENABLED: return
         if not settings.CACHE_FAILURE_RESULTS and probe_data.ttfb_ms >= 9999.0: return
         snapshot = cls.probe_config_snapshot(probe_config, api_sites)

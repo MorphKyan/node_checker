@@ -3,13 +3,16 @@ import os
 import subprocess
 import tempfile
 import asyncio
-from models import ProxyNode, VlessNode, Hy2Node
+from models import ProxyNode, Hy2Node, SsNode
+from module_shadowsocks import singbox_shadowsocks_outbound, xray_shadowsocks_outbound
 from settings import settings
 
 class TunnelController:
     @staticmethod
     def generate_singbox_config(node: ProxyNode, local_port: int) -> str:
-        if isinstance(node, Hy2Node) or getattr(node, "protocol", "vless") in {"hy2", "hysteria2"}:
+        if isinstance(node, SsNode):
+            outbound = singbox_shadowsocks_outbound(node, "ss-out")
+        elif isinstance(node, Hy2Node) or getattr(node, "protocol", "vless") in {"hy2", "hysteria2"}:
             outbound = {
                 "type": "hysteria2",
                 "tag": "hy2-out",
@@ -33,44 +36,16 @@ class TunnelController:
             if getattr(node, "down_mbps", None) is not None:
                 outbound["down_mbps"] = node.down_mbps
 
-            config = {
-                "log": {"level": "fatal"},
-                "inbounds": [
-                    {
-                        "type": "socks",
-                        "tag": "socks-in",
-                        "listen": "127.0.0.1",
-                        "listen_port": local_port
-                    }
-                ],
-                "outbounds": [outbound]
-            }
         else:
-            config = {
-                "log": {"level": "fatal"},
-                "inbounds": [
-                    {
-                        "type": "socks",
-                        "tag": "socks-in",
-                        "listen": "127.0.0.1",
-                        "listen_port": local_port
-                    }
-                ],
-                "outbounds": [
-                    {
-                        "type": "vless",
-                        "tag": "vless-out",
-                        "server": node.server_ip,
-                        "server_port": node.server_port,
-                        "uuid": getattr(node, "uuid", ""),
-                        "flow": getattr(node, "flow", "")
-                    }
-                ]
+            outbound = {
+                "type": "vless",
+                "tag": "vless-out",
+                "server": node.server_ip,
+                "server_port": node.server_port,
+                "uuid": getattr(node, "uuid", ""),
             }
-            
-            # Remove empty flow to avoid sing-box schema error
-            if not config["outbounds"][0]["flow"]:
-                del config["outbounds"][0]["flow"]
+            if getattr(node, "flow", ""):
+                outbound["flow"] = node.flow
             
             # TLS / Reality
             security = getattr(node, "security", "")
@@ -90,22 +65,28 @@ class TunnelController:
                         "public_key": getattr(node, "pbk", ""),
                         "short_id": getattr(node, "sid", "")
                     }
-                config["outbounds"][0]["tls"] = tls_config
+                outbound["tls"] = tls_config
 
             # Transport type
             node_type = getattr(node, "type", "tcp")
             if node_type == "ws":
-                config["outbounds"][0]["transport"] = {
+                outbound["transport"] = {
                     "type": "ws",
                     "path": getattr(node, "path", ""),
                     "headers": {"Host": getattr(node, "host", "")} if getattr(node, "host", "") else {}
                 }
             elif node_type == "grpc":
-                config["outbounds"][0]["transport"] = {
+                outbound["transport"] = {
                     "type": "grpc",
                     "service_name": getattr(node, "path", "") or ""
                 }
 
+        config = {
+            "log": {"level": "fatal"},
+            "inbounds": [{"type": "socks", "tag": "socks-in",
+                          "listen": "127.0.0.1", "listen_port": local_port}],
+            "outbounds": [outbound],
+        }
         fd, path = tempfile.mkstemp(suffix=".json", prefix="singbox_")
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(config, f)
@@ -113,7 +94,9 @@ class TunnelController:
 
     @staticmethod
     def generate_xray_config(node: ProxyNode, local_port: int) -> str:
-        if isinstance(node, Hy2Node) or getattr(node, "protocol", "vless") in {"hy2", "hysteria2"}:
+        if isinstance(node, SsNode):
+            outbound = xray_shadowsocks_outbound(node, "ss-out")
+        elif isinstance(node, Hy2Node) or getattr(node, "protocol", "vless") in {"hy2", "hysteria2"}:
             outbound = {
                 "protocol": "hysteria",
                 "tag": "hy2-out",
@@ -135,66 +118,25 @@ class TunnelController:
                     }
                 }
             }
-            config = {
-                "log": {"loglevel": "warning"},
-                "inbounds": [
-                    {
-                        "port": local_port,
-                        "listen": "127.0.0.1",
-                        "protocol": "socks",
-                        "settings": {
-                            "auth": "noauth",
-                            "udp": True
-                        }
-                    }
-                ],
-                "outbounds": [outbound]
-            }
         else:
-            config = {
-                "log": {"loglevel": "warning"},
-                "inbounds": [
-                    {
-                        "port": local_port,
-                        "listen": "127.0.0.1",
-                        "protocol": "socks",
-                        "settings": {
-                            "auth": "noauth",
-                            "udp": True
-                        }
-                    }
-                ],
-                "outbounds": [
-                    {
-                        "protocol": "vless",
-                        "tag": "vless-out",
-                        "settings": {
-                            "vnext": [
-                                {
-                                    "address": node.server_ip,
-                                    "port": node.server_port,
-                                    "users": [
-                                        {
-                                            "id": getattr(node, "uuid", ""),
-                                            "encryption": "none"
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        "streamSettings": {
-                            "network": "tcp",
-                            "security": "none"
-                        }
-                    }
-                ]
+            outbound = {
+                "protocol": "vless",
+                "tag": "vless-out",
+                "settings": {
+                    "vnext": [{
+                        "address": node.server_ip,
+                        "port": node.server_port,
+                        "users": [{"id": getattr(node, "uuid", ""), "encryption": "none"}],
+                    }],
+                },
+                "streamSettings": {"network": "tcp", "security": "none"},
             }
 
             # flow
             if getattr(node, "flow", ""):
-                config["outbounds"][0]["settings"]["vnext"][0]["users"][0]["flow"] = node.flow
+                outbound["settings"]["vnext"][0]["users"][0]["flow"] = node.flow
 
-            stream_settings = config["outbounds"][0]["streamSettings"]
+            stream_settings = outbound["streamSettings"]
 
             # TLS / Reality
             security = getattr(node, "security", "")
@@ -246,6 +188,12 @@ class TunnelController:
                     "mode": getattr(node, "mode", "") or "auto"
                 }
 
+        config = {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{"protocol": "socks", "listen": "127.0.0.1",
+                          "port": local_port, "settings": {"auth": "noauth", "udp": True}}],
+            "outbounds": [outbound],
+        }
         fd, path = tempfile.mkstemp(suffix=".json", prefix="xray_")
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(config, f)

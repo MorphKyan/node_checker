@@ -27,6 +27,14 @@ class VlessNode(ProxyNode):
     mode: str = ""
 
 @dataclass
+class SsNode(ProxyNode):
+    protocol: str = "ss"
+    method: str = ""
+    password: str = ""
+    plugin: str = ""
+    plugin_opts: str = ""
+
+@dataclass
 class Hy2Node(ProxyNode):
     password: str = ""
     protocol: str = "hy2"

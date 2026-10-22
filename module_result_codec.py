@@ -1,22 +1,20 @@
 import json
 from dataclasses import asdict, fields
 
-from models import ApiVerdict, AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode, Hy2Node, ProxyNode
+from models import ApiVerdict, AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode, Hy2Node, ProxyNode, SsNode
 
 
 def restore_proxy_node(node_data: dict) -> ProxyNode:
     protocol = node_data.get("protocol", "")
     raw_uri = node_data.get("raw_uri", "")
-    if protocol in {"hy2", "hysteria2"} or raw_uri.startswith("hy2://") or raw_uri.startswith("hysteria2://"):
-        allowed = {field.name for field in fields(Hy2Node)}
-        clean_data = {k: v for k, v in node_data.items() if k in allowed}
-        return Hy2Node(**clean_data)
+    if protocol == "ss" or raw_uri.startswith("ss://"):
+        node_type = SsNode
+    elif protocol in {"hy2", "hysteria2"} or raw_uri.startswith("hy2://") or raw_uri.startswith("hysteria2://"):
+        node_type = Hy2Node
     else:
-        allowed = {field.name for field in fields(VlessNode)}
-        clean_data = {k: v for k, v in node_data.items() if k in allowed}
-        clean_data.setdefault("alpn", "")
-        clean_data.setdefault("mode", "")
-        return VlessNode(**clean_data)
+        node_type = VlessNode
+    allowed = {field.name for field in fields(node_type)}
+    return node_type(**{key: value for key, value in node_data.items() if key in allowed})
 
 
 def _restore_label_evidence(items) -> list[LabelEvidence]:

@@ -1,4 +1,7 @@
 import asyncio
+import base64
+from contextlib import redirect_stdout
+from io import StringIO
 import unittest
 
 from aiohttp import web
@@ -8,6 +11,25 @@ from settings import settings
 
 
 class VlessParserTests(unittest.TestCase):
+    def test_urlsafe_base64_subscription_with_unicode_remark(self):
+        raw = "vless://uuid@example.com:443#测试x😀"
+        encoded = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+        self.assertTrue("-" in encoded or "_" in encoded)
+        self.assertEqual(VlessParser.parse_nodes(encoded), VlessParser.parse_nodes(raw))
+
+    def test_invalid_nodes_do_not_log_credentials(self):
+        output = StringIO()
+        with redirect_stdout(output):
+            nodes = VlessParser.parse_nodes("\n".join([
+                "ss://aes-128-gcm:secret-ss@host:bad",
+                "vless://secret-uuid@host:bad",
+                "hy2://secret-password@host:bad",
+                "vless://uuid@host:443",
+            ]))
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(output.getvalue().count("Failed to parse"), 3)
+        self.assertNotIn("secret", output.getvalue())
+
     def test_parse_ipv6_host_with_brackets(self):
         raw = "vless://uuid@[2001:db8::1]:443?security=tls&sni=example.com#IPv6"
 

@@ -1,6 +1,6 @@
 import base64
 import urllib.parse
-from models import ProxyNode, VlessNode, Hy2Node
+from models import ProxyNode, VlessNode, Hy2Node, SsNode
 import aiohttp
 from settings import settings
 
@@ -170,31 +170,64 @@ class NodeParser:
         )
 
     @staticmethod
+    def parse_ss_line(line: str) -> SsNode:
+        # SIP002 userinfo (Base64URL or percent-encoded) and legacy full Base64.
+        main, _, fragment = line.partition('#')
+        authority, _, query = main[len("ss://"):].partition('?')
+
+        def decode_base64(value: str) -> str:
+            value = urllib.parse.unquote(value)
+            return base64.b64decode(
+                value + "=" * (-len(value) % 4), altchars=b"-_", validate=True
+            ).decode("utf-8")
+
+        legacy = '@' not in authority
+        if legacy:
+            authority = decode_base64(authority)
+        credentials, server = authority.rsplit('@', 1)
+        if not legacy:
+            if ':' in credentials:
+                credentials = urllib.parse.unquote(credentials)
+            else:
+                credentials = decode_base64(credentials)
+        method, password = credentials.split(':', 1)
+        endpoint = urllib.parse.urlsplit(f"//{server}")
+        if not method or not password or not endpoint.hostname or not endpoint.port:
+            raise ValueError("Missing Shadowsocks credentials, host or port")
+        params = dict(urllib.parse.parse_qsl(query))
+        plugin, _, plugin_opts = params.get("plugin", "").partition(';')
+        remark = urllib.parse.unquote(fragment)
+        return SsNode(
+            raw_uri=line, server_ip=endpoint.hostname, server_port=endpoint.port,
+            remark=remark, expected_geo=NodeParser._match_geo(remark),
+            method=method, password=password, plugin=plugin, plugin_opts=plugin_opts,
+        )
+
+    @staticmethod
     def parse_nodes(raw_text: str) -> list[ProxyNode]:
         raw_text = raw_text.strip()
-        padded_text = raw_text
-        padding = 4 - (len(padded_text) % 4)
-        if padding != 4:
-            padded_text += "=" * padding
-            
         try:
-            decoded = base64.b64decode(padded_text).decode('utf-8')
-        except Exception:
+            decoded = base64.b64decode(raw_text + "=" * (-len(raw_text) % 4), altchars=b"-_").decode('utf-8')
+        except ValueError:
             decoded = raw_text
 
+        parsers = {
+            "ss": NodeParser.parse_ss_line,
+            "vless": NodeParser.parse_vless_line,
+            "hy2": NodeParser.parse_hy2_line,
+            "hysteria2": NodeParser.parse_hy2_line,
+        }
         nodes = []
         for line in decoded.splitlines():
             line = line.strip()
-            if line.startswith("vless://"):
-                try:
-                    nodes.append(NodeParser.parse_vless_line(line))
-                except Exception as e:
-                    print(f"[Parser] Failed to parse VLESS line: {line[:30]}... Error: {e}")
-            elif line.startswith("hy2://") or line.startswith("hysteria2://"):
-                try:
-                    nodes.append(NodeParser.parse_hy2_line(line))
-                except Exception as e:
-                    print(f"[Parser] Failed to parse Hy2 line: {line[:30]}... Error: {e}")
+            scheme, _, _ = line.partition("://")
+            parser = parsers.get(scheme)
+            if parser is None:
+                continue
+            try:
+                nodes.append(parser(line))
+            except ValueError:
+                print(f"[Parser] Failed to parse {scheme} line (invalid URI)")
                 
         return nodes
 

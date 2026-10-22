@@ -1,6 +1,7 @@
 import json
 import re
-from models import TestedNode, Hy2Node
+from models import TestedNode, Hy2Node, SsNode
+from module_shadowsocks import singbox_shadowsocks_outbound
 from module_subscription_exporter import SubscriptionExporter
 
 def strip_comments(json_str: str) -> str:
@@ -62,7 +63,9 @@ def generate_singbox_config(
     node_tags = []
     for node, tag in zip(sorted_nodes, remarks):
         p_node = node.analyzed_node.node
-        if isinstance(p_node, Hy2Node) or getattr(p_node, "protocol", "vless") in {"hy2", "hysteria2"}:
+        if isinstance(p_node, SsNode):
+            outbound = singbox_shadowsocks_outbound(p_node, tag)
+        elif isinstance(p_node, Hy2Node) or getattr(p_node, "protocol", "vless") in {"hy2", "hysteria2"}:
             outbound = {
                 "type": "hysteria2",
                 "tag": tag,

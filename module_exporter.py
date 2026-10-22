@@ -1,7 +1,7 @@
 import os
 import re
 import unicodedata
-from models import TestedNode, Hy2Node
+from models import TestedNode, Hy2Node, SsNode
 
 def get_visual_width(s: str) -> int:
     width = 0
@@ -112,7 +112,13 @@ class ResultExporter:
             detail_path = os.path.join(details_dir, f"{safe_remark}.md")
             
             node_protocol = getattr(an.node, "protocol", "vless").upper()
-            if isinstance(an.node, Hy2Node) or getattr(an.node, "protocol", "vless") in {"hy2", "hysteria2"}:
+            if isinstance(an.node, SsNode):
+                basic_info_block = f"""- **Protocol**: `{node_protocol}`
+- **Method**: `{an.node.method}`
+- **Server**: `{an.node.server_ip}:{an.node.server_port}`
+- **Expected Geo**: `{an.node.expected_geo}`
+- **Plugin**: `{an.node.plugin or "None"}`"""
+            elif isinstance(an.node, Hy2Node) or getattr(an.node, "protocol", "vless") in {"hy2", "hysteria2"}:
                 basic_info_block = f"""- **Protocol**: `{node_protocol}`
 - **Password**: `{getattr(an.node, "password", "")}`
 - **Server**: `{an.node.server_ip}:{an.node.server_port}`

@@ -20,7 +20,8 @@ from settings import settings
 
 
 def node(risk=None, *, valid=True, name="n") -> TestedNode:
-    raw = VlessNode(f"vless://uuid-{name}@example.com:443#{name}", f"uuid-{name}", "example.com", 443, name, "JP")
+    raw = VlessNode(raw_uri=f"vless://uuid-{name}@example.com:443#{name}", uuid=f"uuid-{name}",
+                    server_ip="example.com", server_port=443, remark=name, expected_geo="JP")
     profile = NodeProfile(risk_score=risk, evidence=[ApiVerdict(source="ipwho.is", site_id="ipwhois", status="success", risk_score=risk)] if risk is not None else [])
     probe = ProbeData(9999, 120, "203.0.113.1", "JP", "asn", profile=profile)
     return TestedNode(AnalyzedNode(raw, probe, valid, "" if valid else "TTFB timeout"), None, "not_tested")

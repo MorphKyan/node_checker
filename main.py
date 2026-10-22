@@ -2,7 +2,7 @@ import asyncio
 import os
 from settings import settings
 from module_setup import setup_singbox
-from module_parser import VlessParser
+from module_parser import NodeParser
 from module_exporter import ResultExporter
 from module_cache import ProbeCache
 from module_subscription_exporter import SubscriptionExporter
@@ -24,8 +24,8 @@ async def main():
         print(f"File {sub_url} not found. Exiting.")
         return
 
-    nodes = VlessParser.parse_nodes(raw_text)
-    print(f"Parsed {len(nodes)} valid Vless nodes.")
+    nodes = NodeParser.parse_nodes(raw_text)
+    print(f"Parsed {len(nodes)} proxy nodes.")
     if not nodes:
         return
 

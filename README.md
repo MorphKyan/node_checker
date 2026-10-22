@@ -1,8 +1,8 @@
 # Vless Node Checker
 
-Vless Node Checker 是一个本地 VLESS 节点检测与订阅增强工具。它可以解析订阅链接或本地订阅文件，启动 `sing-box` 隧道检测节点连通性，查询可配置的 IP 情报 API，生成节点画像，并输出 Markdown 报告、增强订阅文件和本地 FastAPI 后端服务。
+Vless Node Checker 是一个本地代理节点检测与订阅增强工具，支持 VLESS、Hysteria2 和 Shadowsocks。它可以解析订阅链接或本地订阅文件，启动 `sing-box` 或 `Xray` 隧道检测节点连通性，查询可配置的 IP 情报 API，生成节点画像，并输出 Markdown 报告、增强订阅文件和本地 FastAPI 后端服务。
 
-增强订阅只重写 VLESS URI 的 `#remark` 节点名，不修改 UUID、地址、端口、传输层、安全参数、SNI、path、host 等连接参数。
+增强订阅只重写原始 URI 的 `#remark` 节点名，不修改密码、加密方法、UUID、地址、端口、传输层、安全参数、SNI、path、host 等连接参数。
 
 ## 项目定位
 
@@ -37,7 +37,8 @@ SG
 
 ## 功能概览
 
-- 解析 VLESS 订阅，支持明文 URI 列表和 base64 订阅内容。
+- 解析 VLESS、Hysteria2（hy2 / hysteria2）和 Shadowsocks（ss）订阅，支持混合明文 URI 列表和 base64 订阅内容。
+- SS 支持 SIP002（Base64URL 或明文转义凭据）、旧版整段 Base64、IPv6 和 SS2022；可通过 Xray / sing-box 检测，并导出增强 URI、sing-box 配置。SIP003 插件参数保留并传给 sing-box，Xray 遇到插件会明确拒绝。
 - 检测 TCP Ping、TTFB、出口 IP、实际地区、ASN、绕路和骨干网信息。
 - 查询 IP 情报并生成节点画像，包括网络分类、类型分类、风险分和证据。
 - 节点是否有效仅由 TTFB 决定；IP 情报 API 只提供画像与风险证据。

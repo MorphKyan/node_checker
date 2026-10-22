@@ -115,6 +115,19 @@ class SubscriptionRefreshServiceTests(unittest.TestCase):
             {"JP-3", "US-6"},
         )
 
+    def test_speedtest_prioritizes_zero_risk_and_puts_unknown_last(self):
+        nodes = [make_analyzed_node(make_node(i), risk=risk)
+                 for i, risk in enumerate([None, 20, 0, 0, 5])]
+        nodes[3].probe.ttfb_ms = 100
+
+        selected, skipped = SubscriptionRefreshService.select_speedtest_nodes_per_region(nodes, 1)
+        self.assertEqual(selected, [nodes[3]])
+        self.assertEqual(skipped, [nodes[2], nodes[4], nodes[1], nodes[0]])
+
+        nodes[4].node.expected_geo = nodes[4].probe.actual_geo = "US"
+        selected, _ = SubscriptionRefreshService.select_speedtest_nodes_per_region(nodes, 1)
+        self.assertEqual(selected, [nodes[3], nodes[4]])
+
 
 if __name__ == "__main__":
     unittest.main()

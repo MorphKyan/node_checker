@@ -1,11 +1,17 @@
 import hashlib
 import json
 
-from models import ProxyNode, Hy2Node, VlessNode
+from models import ProxyNode, Hy2Node, VlessNode, SsNode
 
 
 def make_node_fingerprint(node: ProxyNode) -> str:
-    if isinstance(node, Hy2Node) or getattr(node, "protocol", "vless") in {"hy2", "hysteria2"}:
+    if isinstance(node, SsNode):
+        identity = {
+            "protocol": "ss", "server_ip": node.server_ip, "server_port": node.server_port,
+            "method": node.method, "password": node.password,
+            "plugin": node.plugin, "plugin_opts": node.plugin_opts,
+        }
+    elif isinstance(node, Hy2Node) or getattr(node, "protocol", "vless") in {"hy2", "hysteria2"}:
         identity = {
             "protocol": "hy2",
             "password": node.password,

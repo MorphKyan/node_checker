@@ -1,7 +1,8 @@
 import unittest
+from dataclasses import asdict
 
-from models import AnalyzedNode, ApiVerdict, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode
-from module_result_codec import restore_probe_data, tested_nodes_from_json as _tested_nodes_from_json, tested_nodes_to_json as _tested_nodes_to_json
+from models import AnalyzedNode, ApiVerdict, Hy2Node, LabelEvidence, NodeProfile, ProbeData, SsNode, TestedNode, VlessNode
+from module_result_codec import restore_probe_data, restore_proxy_node, tested_nodes_from_json as _tested_nodes_from_json, tested_nodes_to_json as _tested_nodes_to_json
 
 
 def make_node() -> TestedNode:
@@ -31,6 +32,18 @@ def make_node() -> TestedNode:
 
 
 class ResultCodecTests(unittest.TestCase):
+    def test_restore_nodes_uses_defaults_and_ignores_unknown_fields(self):
+        for node_type, scheme in [(VlessNode, "vless"), (Hy2Node, "hysteria2"), (SsNode, "ss")]:
+            with self.subTest(protocol=scheme):
+                original = node_type(raw_uri=f"{scheme}://example", server_ip="example.com",
+                                     server_port=443, remark="JP", expected_geo="JP")
+                data = asdict(original)
+                del data["protocol"]
+                for key in ("alpn", "mode"):
+                    data.pop(key, None)
+                data["unknown_field"] = "ignored"
+                self.assertEqual(restore_proxy_node(data), original)
+
     def test_round_trips_tested_nodes_with_profile_evidence(self):
         restored = _tested_nodes_from_json(_tested_nodes_to_json([make_node()]))
 

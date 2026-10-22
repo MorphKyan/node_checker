@@ -2,11 +2,11 @@ import asyncio
 import os
 import socket
 
-from models import AnalyzedNode, ProbeData, TestedNode, ProxyNode, VlessNode
+from models import AnalyzedNode, ProbeData, TestedNode, ProxyNode
 from module_analyzer import NodeAnalyzer
 from module_api_store import ApiStore
 from module_cache import ProbeCache
-from module_parser import NodeParser, VlessParser
+from module_parser import NodeParser
 from module_probe import LightweightProbe
 from module_setup import setup_singbox, setup_xray
 from module_tunnel import TunnelController
@@ -46,12 +46,12 @@ class SubscriptionRefreshService:
         nodes_to_test: list[AnalyzedNode] = []
         nodes_to_skip: list[AnalyzedNode] = []
         for region_nodes in nodes_by_region.values():
-            region_nodes.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 101, node.probe.ttfb_ms))
+            region_nodes.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 0, node.probe.ttfb_ms))
             nodes_to_test.extend(region_nodes[:limit])
             nodes_to_skip.extend(region_nodes[limit:])
 
-        nodes_to_test.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 101, node.probe.ttfb_ms))
-        nodes_to_skip.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 101, node.probe.ttfb_ms))
+        nodes_to_test.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 0, node.probe.ttfb_ms))
+        nodes_to_skip.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 0, node.probe.ttfb_ms))
         nodes_to_skip.extend(invalid_nodes)
         return nodes_to_test, nodes_to_skip
 
@@ -126,7 +126,7 @@ class SubscriptionRefreshService:
     @classmethod
     async def run_nodes(
         cls,
-        nodes: list[VlessNode],
+        nodes: list[ProxyNode],
         *,
         speedtest_limit: int,
         force_probe: bool = False,
@@ -139,7 +139,7 @@ class SubscriptionRefreshService:
         filter_sem = asyncio.Semaphore(settings.FILTER_CONCURRENCY)
         processed = 0
 
-        async def filter_with_progress(node: VlessNode) -> AnalyzedNode:
+        async def filter_with_progress(node: ProxyNode) -> AnalyzedNode:
             nonlocal processed
             result = await cls.process_node_filter(node, filter_sem, force_probe=force_probe, probe_config=probe_config)
             processed += 1
@@ -205,7 +205,7 @@ class SubscriptionRefreshService:
         )
 
         raw_text = await cls.fetch_subscription_text(subscription["url"])
-        nodes = VlessParser.parse_nodes(raw_text)
+        nodes = NodeParser.parse_nodes(raw_text)
         if not nodes:
             raise ValueError("No valid VLESS nodes found in subscription")
 

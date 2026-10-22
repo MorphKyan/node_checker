@@ -7,10 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tar \
     unzip \
-    && curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.9.3/sing-box-1.9.3-linux-amd64.tar.gz \
-    && tar -xzf sing-box.tar.gz --strip-components=1 -C /usr/local/bin/ sing-box-1.9.3-linux-amd64/sing-box \
+    && curl -fLo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz \
+    && tar -xzf sing-box.tar.gz --strip-components=1 -C /usr/local/bin/ sing-box-1.14.3-linux-amd64/sing-box \
     && rm -rf sing-box.tar.gz \
-    && curl -Lo xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip \
+    && curl -fLo xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip \
     && unzip xray.zip xray -d /usr/local/bin/ \
     && chmod +x /usr/local/bin/xray \
     && rm -rf xray.zip \

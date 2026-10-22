@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 import deploy
 from api_server import app
-from models import AnalyzedNode, Hy2Node, NodeProfile, ProbeData, SsNode, TestedNode, VlessNode
+from models import AnalyzedNode, Hy2Node, ProbeData, SsNode, TestedNode, VlessNode
 from module_api_store import ApiStore
 from module_cache import ProbeCache
 from module_exporter import ResultExporter

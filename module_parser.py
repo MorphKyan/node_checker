@@ -31,13 +31,11 @@ class NodeParser:
                 content_length = resp.headers.get("Content-Length")
                 if content_length:
                     try:
-                        if int(content_length) > max_bytes:
-                            raise ValueError(
-                                f"Subscription response exceeds {max_bytes} bytes"
-                            )
-                    except ValueError as e:
-                        if "exceeds" in str(e):
-                            raise
+                        content_length = int(content_length)
+                    except ValueError:
+                        content_length = 0
+                    if content_length > max_bytes:
+                        raise ValueError(f"Subscription response exceeds {max_bytes} bytes")
 
                 chunks = []
                 downloaded_bytes = 0

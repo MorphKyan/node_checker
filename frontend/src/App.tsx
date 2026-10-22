@@ -37,7 +37,7 @@ import { ApiError, createApiClient, enhancedUrl } from "./api";
 import type { ApiClient } from "./api";
 import { useAppData } from "./appData";
 import { duration, formatTime, groupCount, riskBuckets, statusTone, stripComments } from "./appUtils";
-import { filterNodes } from "./nodeFilters";
+import { filterNodes, type NodeFilters } from "./nodeFilters";
 import { defaultPreferences, isExportFormat, isExportMode, loadPreferences, savePreferences } from "./preferences";
 import type {
   ApiVerdict,
@@ -115,16 +115,10 @@ export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [preferences, setPreferencesState] = useState<LocalPreferences>(() => loadPreferences());
   const [selectedSubscriptionId, setSelectedSubscriptionId] = useState<string>("");
-  const [nodeSearch, setNodeSearch] = useState("");
-  const [nodeValidity, setNodeValidity] = useState("all");
-  const [nodeGeo, setNodeGeo] = useState("all");
-  const [nodeNetwork, setNodeNetwork] = useState("all");
-  const [nodeType, setNodeType] = useState("all");
-  const [maxTtfb, setMaxTtfb] = useState("");
-  const [maxRisk, setMaxRisk] = useState("");
-  const [minSpeed, setMinSpeed] = useState("");
-  const [detourFilter, setDetourFilter] = useState("all");
-  const [backboneFilter, setBackboneFilter] = useState("all");
+  const [nodeFilters, setNodeFilters] = useState<NodeFilters>({
+    nodeSearch: "", nodeValidity: "all", nodeGeo: "all", nodeNetwork: "all", nodeType: "all",
+    maxTtfb: "", maxRisk: "", minSpeed: "", detourFilter: "all", backboneFilter: "all",
+  });
   const [page, setPage] = useState(1);
   const [detailsNode, setDetailsNode] = useState<NodeResult | null>(null);
   const [exportMode, setExportMode] = useState<ExportMode>(preferences.defaultExportMode);
@@ -164,10 +158,9 @@ export default function App() {
   const averageTtfb = allNodes.length ? allNodes.reduce((sum, node) => sum + node.probe.ttfb_ms, 0) / allNodes.length : 0;
   const maxSpeed = allNodes.reduce((max, node) => Math.max(max, node.download_speed_mbps || 0), 0);
 
-  const nodeFilters = { nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, maxRisk, maxTtfb, minSpeed, detourFilter, backboneFilter };
   const filteredNodes = useMemo(
     () => filterNodes(selectedResult?.nodes || [], nodeFilters),
-    [selectedResult, nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, maxRisk, maxTtfb, minSpeed, detourFilter, backboneFilter],
+    [selectedResult, nodeFilters],
   );
 
   const totalPages = Math.max(1, Math.ceil(filteredNodes.length / preferences.pageSize));
@@ -402,23 +395,14 @@ export default function App() {
               geoOptions={geoOptions}
               networkOptions={networkOptions}
               typeOptions={typeOptions}
-              filters={{ nodeSearch, nodeValidity, nodeGeo, nodeNetwork, nodeType, maxRisk, maxTtfb, minSpeed, detourFilter, backboneFilter }}
+              filters={nodeFilters}
               onSelectSubscription={(id) => {
                 setPage(1);
                 setSelectedSubscriptionId(id);
               }}
               onFilters={(next) => {
                 setPage(1);
-                if (next.nodeSearch !== undefined) setNodeSearch(next.nodeSearch);
-                if (next.nodeValidity !== undefined) setNodeValidity(next.nodeValidity);
-                if (next.nodeGeo !== undefined) setNodeGeo(next.nodeGeo);
-                if (next.nodeNetwork !== undefined) setNodeNetwork(next.nodeNetwork);
-                if (next.nodeType !== undefined) setNodeType(next.nodeType);
-                if (next.maxRisk !== undefined) setMaxRisk(next.maxRisk);
-                if (next.maxTtfb !== undefined) setMaxTtfb(next.maxTtfb);
-                if (next.minSpeed !== undefined) setMinSpeed(next.minSpeed);
-                if (next.detourFilter !== undefined) setDetourFilter(next.detourFilter);
-                if (next.backboneFilter !== undefined) setBackboneFilter(next.backboneFilter);
+                setNodeFilters((current) => ({ ...current, ...next }));
               }}
               onPage={setPage}
               onDetails={setDetailsNode}
@@ -452,7 +436,6 @@ export default function App() {
               onCreateTemplate={(name, content) => createTemplate.mutate({ name, content })}
               onUpdateTemplate={(id, name, content) => updateTemplate.mutate({ id, name, content })}
               onDeleteTemplate={(id) => deleteTemplate.mutate(id)}
-              apiBaseUrl={preferences.apiBaseUrl}
               api={api}
             />
           )}
@@ -494,7 +477,7 @@ function Dashboard({
   const networkData = groupCount(nodes.flatMap((node) => node.probe.network_labels));
   const typeData = groupCount(nodes.flatMap((node) => node.probe.type_labels));
   const geoData = groupCount(nodes.map((node) => node.probe.actual_geo));
-  const speedTop = [...nodes].filter((node) => node.download_speed_mbps !== null).sort((a, b) => (b.download_speed_mbps || 0) - (a.download_speed_mbps || 0)).slice(0, 10).map((node) => ({ name: node.original_name || node.probe.actual_geo, value: Number((node.download_speed_mbps || 0).toFixed(2)) }));
+  const speedTop = nodes.filter((node) => node.download_speed_mbps !== null).sort((a, b) => (b.download_speed_mbps || 0) - (a.download_speed_mbps || 0)).slice(0, 10).map((node) => ({ name: node.original_name || node.probe.actual_geo, value: Number((node.download_speed_mbps || 0).toFixed(2)) }));
   const ttfbTop = [...nodes].sort((a, b) => a.probe.ttfb_ms - b.probe.ttfb_ms).slice(0, 10).map((node) => ({ name: node.original_name || node.probe.actual_geo, value: Math.round(node.probe.ttfb_ms) }));
 
   return (
@@ -696,9 +679,9 @@ export function NodesView(props: {
   geoOptions: string[];
   networkOptions: string[];
   typeOptions: string[];
-  filters: Record<string, string>;
+  filters: NodeFilters;
   onSelectSubscription: (id: string) => void;
-  onFilters: (next: Record<string, string>) => void;
+  onFilters: (next: Partial<NodeFilters>) => void;
   onPage: (page: number) => void;
   onDetails: (node: NodeResult) => void;
 }) {
@@ -774,9 +757,6 @@ export function NodesView(props: {
               </thead>
               <tbody>
                 {props.pagedNodes.map((node, index) => {
-                  const rawKey = `${node.fingerprint}:raw`;
-                  const compactKey = `${node.fingerprint}:compact`;
-                  const detailedKey = `${node.fingerprint}:detailed`;
                   return (
                     <tr key={`${node.fingerprint}-${index}`} className="border-t border-border">
                       <td className="max-w-xs truncate px-3 py-3 font-medium" title={node.original_name}>{node.original_name}</td>
@@ -812,33 +792,22 @@ export function NodesView(props: {
                             {activeCopyDropdown === node.fingerprint && (
                               <div className="absolute right-0 mt-1 w-32 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-20 border border-slate-200 divide-y divide-slate-100">
                                 <div className="py-1">
-                                  <button
-                                    onClick={() => {
-                                      void copyNodeUri(rawKey, node.raw_uri);
-                                      setActiveCopyDropdown(null);
-                                    }}
-                                    className="block w-full px-4 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 font-medium"
-                                  >
-                                    原始链接
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      void copyNodeUri(compactKey, node.compact_uri);
-                                      setActiveCopyDropdown(null);
-                                    }}
-                                    className="block w-full px-4 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 font-medium"
-                                  >
-                                    紧凑 (compact)
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      void copyNodeUri(detailedKey, node.detailed_uri);
-                                      setActiveCopyDropdown(null);
-                                    }}
-                                    className="block w-full px-4 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 font-medium"
-                                  >
-                                    详细 (detailed)
-                                  </button>
+                                  {[
+                                    ["raw", "原始链接", node.raw_uri],
+                                    ["compact", "紧凑 (compact)", node.compact_uri],
+                                    ["detailed", "详细 (detailed)", node.detailed_uri],
+                                  ].map(([mode, label, uri]) => (
+                                    <button
+                                      key={mode}
+                                      onClick={() => {
+                                        void copyNodeUri(`${node.fingerprint}:${mode}`, uri);
+                                        setActiveCopyDropdown(null);
+                                      }}
+                                      className="block w-full px-4 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 font-medium"
+                                    >
+                                      {label}
+                                    </button>
+                                  ))}
                                 </div>
                               </div>
                             )}
@@ -988,18 +957,13 @@ function SettingsView({ settings, metadata, preferences, onSaveSettings, onPrefe
   );
 }
 
-function SettingNumber({ label, value, metadata, step, onChange }: { label: string; value: number; metadata?: { min?: number; max?: number }; step?: string; onChange: (value: number) => void }) {
+function SettingNumber({ label, value, metadata, onChange }: { label: string; value: number; metadata?: { min?: number; max?: number }; onChange: (value: number) => void }) {
   const inputId = `setting-${label}`;
-  return <div><Label htmlFor={inputId}>{label}</Label><Input id={inputId} className="mt-1" type="number" min={metadata?.min} max={metadata?.max} step={step} value={value ?? 0} onChange={(event) => onChange(Number(event.target.value))} /></div>;
+  return <div><Label htmlFor={inputId}>{label}</Label><Input id={inputId} className="mt-1" type="number" min={metadata?.min} max={metadata?.max} value={value ?? 0} onChange={(event) => onChange(Number(event.target.value))} /></div>;
 }
 
-interface ConflictInfo {
-  type: "geo" | "network" | "risk";
-  description: string;
-}
-
-function detectConflicts(evidence: ApiVerdict[]): ConflictInfo[] {
-  const conflicts: ConflictInfo[] = [];
+function detectConflicts(evidence: ApiVerdict[]): string[] {
+  const conflicts: string[] = [];
   if (!evidence || evidence.length === 0) return conflicts;
 
   // 1. Network type conflict
@@ -1021,12 +985,9 @@ function detectConflicts(evidence: ApiVerdict[]): ConflictInfo[] {
     }
   }
   if (resSources.length && dcSources.length) {
-    conflicts.push({
-      type: "network",
-      description: `属性冲突：部分数据源判定为家宽/商宽/移动网络 [${resSources.join(
-        ", "
-      )}]，而其他判定为机房 [${dcSources.join(", ")}]。`,
-    });
+    conflicts.push(
+      `属性冲突：部分数据源判定为家宽/商宽/移动网络 [${resSources.join(", ")}]，而其他判定为机房 [${dcSources.join(", ")}]。`,
+    );
   }
 
   // 2. Risk evaluation conflict
@@ -1053,12 +1014,9 @@ function detectConflicts(evidence: ApiVerdict[]): ConflictInfo[] {
     }
   }
   if (riskSources.length && cleanSources.length) {
-    conflicts.push({
-      type: "risk",
-      description: `信誉风险冲突：部分数据源报告高风险评分/标签 [${riskSources.join(
-        ", "
-      )}]，而其他数据源判定为干净信誉 [${cleanSources.join(", ")}]。`,
-    });
+    conflicts.push(
+      `信誉风险冲突：部分数据源报告高风险评分/标签 [${riskSources.join(", ")}]，而其他数据源判定为干净信誉 [${cleanSources.join(", ")}]。`,
+    );
   }
 
   return conflicts;
@@ -1094,10 +1052,10 @@ function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }
                 <div>
                   <div className="font-semibold text-amber-950">画像数据源冲突警告</div>
                   <div className="mt-1.5 space-y-1.5 text-xs text-amber-800">
-                    {conflicts.map((c, i) => (
+                    {conflicts.map((description, i) => (
                       <div key={i} className="flex gap-1">
                         <span className="shrink-0">•</span>
-                        <span>{c.description}</span>
+                        <span>{description}</span>
                       </div>
                     ))}
                   </div>
@@ -1196,7 +1154,6 @@ function SingboxView(props: {
   onCreateTemplate: (name: string, content: string) => void;
   onUpdateTemplate: (id: string, name: string, content: string) => void;
   onDeleteTemplate: (id: string) => void;
-  apiBaseUrl: string;
   api: ApiClient;
 }) {
   const { subscriptions, templates, onCreateTemplate, onUpdateTemplate, onDeleteTemplate, api } = props;

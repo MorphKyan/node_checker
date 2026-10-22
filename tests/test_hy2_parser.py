@@ -1,10 +1,9 @@
 import json
 import unittest
 
-from models import Hy2Node, VlessNode, AnalyzedNode, ProbeData, NodeProfile, TestedNode
-from module_parser import NodeParser, VlessParser
+from models import Hy2Node, VlessNode, AnalyzedNode, ProbeData, TestedNode
+from module_parser import NodeParser
 from module_tunnel import TunnelController
-from module_singbox_exporter import generate_singbox_config
 from module_subscription_exporter import SubscriptionExporter
 from module_result_codec import tested_nodes_to_json, tested_nodes_from_json
 

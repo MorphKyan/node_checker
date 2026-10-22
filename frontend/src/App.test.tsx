@@ -3,11 +3,52 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App, { NodesView } from "./App";
 import type { NodeResult, SubscriptionResults } from "./types";
+import { defaultPreferences } from "./preferences";
 
 describe("App", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("combines node filters, resets pagination and copies each URI format", async () => {
+    localStorage.setItem("vless-node-checker.preferences", JSON.stringify({ ...defaultPreferences, pageSize: 1 }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("[]", { headers: { "content-type": "application/json" } })));
+    const node: NodeResult = {
+      fingerprint: "jp", original_name: "JP node", enhanced_name_compact: "compact JP", enhanced_name_detailed: "detailed JP",
+      raw_uri: "vless://uuid@host:443#raw", compact_uri: "vless://uuid@host:443#compact", detailed_uri: "vless://uuid@host:443#detailed",
+      is_valid: true, reject_reason: "", download_speed_mbps: null, speedtest_status: "not_tested",
+      probe: { tcp_ping_ms: 1, ttfb_ms: 2, actual_ip: "1.1.1.1", actual_geo: "JP", asn_org: "ASN", ipv6_support: false, actual_ipv6: "", risk_score: null, network_labels: [], type_labels: [], confidence: "low", is_detour: null, is_backbone: null, backbone_info: "", evidence: [] },
+    };
+    const nodes = [node, { ...node, fingerprint: "us", original_name: "US node", probe: { ...node.probe, actual_geo: "US" } }];
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+    client.setQueryData(["subscriptions", ""], [{ id: "sub", name: "Demo", url: "https://sub.test", last_status: "completed", node_count: 2, valid_count: 2, updated_at: 1 }]);
+    client.setQueryData(["results", "", "sub", "https://sub.test"], { nodes, api_sites_snapshot: [] });
+    render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "节点详情" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByText("US node")).toBeInTheDocument();
+    const search = screen.getByPlaceholderText("名称/IP/ASN");
+    fireEvent.change(search, { target: { value: "JP node" } });
+    expect(screen.getByText("JP node")).toBeInTheDocument();
+    expect(screen.getByText("1 / 1")).toBeInTheDocument();
+    const geo = screen.getAllByRole("combobox")[2];
+    fireEvent.change(geo, { target: { value: "US" } });
+    expect(screen.queryByText("JP node")).not.toBeInTheDocument();
+    expect(screen.queryByText("US node")).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "" } });
+    expect(screen.getByText("US node")).toBeInTheDocument();
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    vi.stubGlobal("isSecureContext", true);
+    for (const [label, uri] of [["原始链接", node.raw_uri], ["紧凑 (compact)", node.compact_uri], ["详细 (detailed)", node.detailed_uri]]) {
+      fireEvent.click(screen.getByRole("button", { name: /^(复制|已复制)$/ }));
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(uri));
+      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
   });
 
   it("renders the console navigation", async () => {

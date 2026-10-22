@@ -37,6 +37,23 @@ def make_analyzed_node(node: VlessNode, risk: float = 10.0, actual_geo: str | No
 
 
 class SubscriptionRefreshServiceTests(unittest.TestCase):
+    def test_run_nodes_without_speedtests_preserves_all_nodes(self):
+        valid = make_analyzed_node(make_node(1))
+        invalid = make_analyzed_node(make_node(2))
+        invalid.is_valid = False
+        for analyzed in ([], [invalid, valid]):
+            with (
+                self.subTest(nodes=len(analyzed)),
+                patch.object(SubscriptionRefreshService, "process_node_filter", side_effect=analyzed),
+                patch.object(SubscriptionRefreshService, "run_speed_test") as speedtest,
+                patch("module_subscription_service.ProbeCache.probe_config_snapshot", return_value={}),
+            ):
+                result = asyncio.run(SubscriptionRefreshService.run_nodes(
+                    [item.node for item in analyzed], speedtest_limit=0,
+                ))
+                self.assertEqual(result, [TestedNode(item) for item in sorted(analyzed, key=lambda item: not item.is_valid)])
+                speedtest.assert_not_called()
+
     def test_fetch_subscription_text_rejects_large_local_file(self):
         original_max_m = settings.SUBSCRIPTION_MAX_M
         settings.SUBSCRIPTION_MAX_M = 1

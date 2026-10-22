@@ -177,7 +177,6 @@ class SubscriptionRefreshService:
             *(filter_with_progress(node) for node in nodes)
         )
 
-        tested_nodes: list[TestedNode] = []
         nodes_to_test, nodes_to_skip = cls.select_speedtest_nodes_per_region(
             analyzed_nodes,
             speedtest_limit,
@@ -197,11 +196,7 @@ class SubscriptionRefreshService:
                 progress_callback("speedtest", speed_processed, len(nodes_to_test))
             return result
 
-        if nodes_to_test:
-            tested_nodes.extend(
-                await asyncio.gather(*(speed_with_progress(node) for node in nodes_to_test))
-            )
-
+        tested_nodes = await asyncio.gather(*(speed_with_progress(node) for node in nodes_to_test))
         tested_nodes.extend(TestedNode(node, None, "not_tested") for node in nodes_to_skip)
         return tested_nodes
 

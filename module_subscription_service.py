@@ -108,11 +108,16 @@ class SubscriptionRefreshService:
         # different site configurations.
         probe_config = SubscriptionRefreshService.freeze_probe_config(probe_config, api_sites)
         async with sem:
+            signature = ProbeCache.config_signature(probe_config=probe_config)
             process = None
             config_path = None
             try:
                 if not force_probe:
-                    cached_probe = await ProbeCache.get(node, probe_config=probe_config)
+                    try:
+                        cached_probe = await ProbeCache.get(node, probe_config=probe_config)
+                    except OSError as e:
+                        print(f"[Cache Error] {node.remark}: {e}")
+                        cached_probe = None
                     if cached_probe is not None:
                         print(f"[Cache Hit] {node.remark}")
                         return NodeAnalyzer.analyze(node, cached_probe)
@@ -121,7 +126,10 @@ class SubscriptionRefreshService:
                 process, config_path = await TunnelController.start_tunnel(node, local_port)
                 socks5_url = f"socks5://127.0.0.1:{local_port}"
                 probe_data = await LightweightProbe.run_probe(node, socks5_url, probe_config=probe_config)
-                await ProbeCache.set(node, probe_data, probe_config=probe_config)
+                try:
+                    await ProbeCache.set(node, probe_data, probe_config=probe_config, expected_signature=signature)
+                except OSError as e:
+                    print(f"[Cache Error] {node.remark}: {e}")
                 return NodeAnalyzer.analyze(node, probe_data)
             except Exception as e:
                 print(f"[Filter Error] {node.remark}: {e}")
@@ -211,9 +219,7 @@ class SubscriptionRefreshService:
         speedtest_limit: int,
         force_probe: bool = False,
     ) -> list[TestedNode]:
-        setup_singbox()
-        setup_xray()
-        await ProbeCache.init_db()
+        await asyncio.to_thread(setup_xray if settings.PROXY_CORE == "xray" else setup_singbox)
         subscription = ApiStore.get_subscription(subscription_id)
         if not subscription:
             raise ValueError(f"Subscription not found: {subscription_id}")
@@ -329,6 +335,13 @@ class SubscriptionRefreshService:
             )
             return ApiStore.get_job(job["id"])
         return job
+
+    @classmethod
+    def cancel_subscription_refreshes(cls, subscription_id: str) -> None:
+        for job_id in list(cls._running_tasks):
+            job = ApiStore.get_job(job_id)
+            if job and job["subscription_id"] == subscription_id:
+                cls.cancel_refresh(job_id)
 
     @classmethod
     def cancel_refresh(cls, job_id: str) -> dict | None:

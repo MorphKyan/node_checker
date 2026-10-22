@@ -70,7 +70,7 @@ export interface ApiClient {
   createSingboxTemplate(input: { name: string; content: string }): Promise<SingboxTemplate>;
   updateSingboxTemplate(id: string, input: { name?: string; content?: string }): Promise<SingboxTemplate>;
   deleteSingboxTemplate(id: string): Promise<{ deleted: boolean; template_id: string }>;
-  getSingboxExport(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }): Promise<string>;
+  getSingboxExport(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }): Promise<Record<string, unknown>>;
   getSingboxExportUrl(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }): string;
 }
 

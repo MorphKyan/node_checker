@@ -384,8 +384,8 @@ async def get_singbox_subscription(
             mode=mode,
             max_name_length=96 if mode == "detailed" else 64
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Configuration generation error: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"Configuration generation error: {e}")
 
     return config
 
@@ -409,7 +409,7 @@ async def get_subscription(subscription_id: str) -> dict:
 @app.patch("/subscriptions/{subscription_id}")
 async def update_subscription(subscription_id: str, payload: SubscriptionUpdateRequest) -> dict:
     ensure_subscription(subscription_id)
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude_none=True)
     if not data:
         raise HTTPException(status_code=422, detail="No fields to update")
     updated = ApiStore.update_subscription(subscription_id, **data)
@@ -420,6 +420,8 @@ async def update_subscription(subscription_id: str, payload: SubscriptionUpdateR
 
 @app.delete("/subscriptions/{subscription_id}")
 async def delete_subscription(subscription_id: str) -> dict:
+    ensure_subscription(subscription_id)
+    SubscriptionRefreshService.cancel_subscription_refreshes(subscription_id)
     if not ApiStore.delete_subscription(subscription_id):
         raise HTTPException(status_code=404, detail="Subscription not found")
     return {"deleted": True, "subscription_id": subscription_id}
@@ -481,7 +483,7 @@ async def get_settings_metadata() -> dict:
 
 @app.patch("/settings")
 async def update_settings(payload: RuntimeSettingsRequest) -> dict:
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude_none=True)
     if not data:
         raise HTTPException(status_code=422, detail="No settings to update")
     return RuntimeSettings.apply(data)
@@ -508,7 +510,7 @@ async def create_api_site(payload: ApiSiteRequest) -> dict:
 @app.patch("/api-sites/{site_id}")
 async def update_api_site(site_id: str, payload: ApiSiteUpdateRequest) -> dict:
     try:
-        updated = ApiStore.update_api_site(site_id, payload.model_dump(exclude_unset=True))
+        updated = ApiStore.update_api_site(site_id, payload.model_dump(exclude_unset=True, exclude_none=True))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     if not updated:
@@ -563,7 +565,7 @@ async def get_singbox_template(template_id: str) -> dict:
 
 @app.patch("/singbox/templates/{template_id}")
 async def update_singbox_template(template_id: str, payload: SingboxTemplateUpdateRequest) -> dict:
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude_none=True)
     if not data:
         raise HTTPException(status_code=422, detail="No fields to update")
     if "content" in data:

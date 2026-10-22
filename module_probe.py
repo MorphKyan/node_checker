@@ -38,7 +38,7 @@ class LightweightProbe:
                 connector = ProxyConnector.from_url(socks5_url, rdns=True)
                 async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.get(target_url, timeout=settings.TTFB_TIMEOUT) as response:
-                        await response.read()
+                        await response.content.read(1)
                         values.append((time.perf_counter() - started) * 1000)
             except Exception:
                 pass
@@ -117,7 +117,7 @@ class LightweightProbe:
             if actual_ip else [(None, "no_data")] * len(sites)
         )
         verdicts = [LightweightProbe._verdict_for_site(site, data, status, actual_ip) for site, (data, status) in zip(sites, responses)]
-        weights = {site.get("column_name", site["id"]): float(site.get("weight", 1)) for site in sites}
+        weights = {site["id"]: float(site.get("weight", 1)) for site in sites}
         profile = NodeProfileAggregator.aggregate(verdicts, weights)
         geo, asn = "Unknown", ""
         for data in [exit_data] + [data for data, status in responses if status == "success"]:

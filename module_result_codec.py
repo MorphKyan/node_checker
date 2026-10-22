@@ -71,10 +71,6 @@ def restore_probe_data(data: dict) -> ProbeData:
     return ProbeData(**data)
 
 
-def probe_data_to_json(probe_data: ProbeData) -> str:
-    return json.dumps(asdict(probe_data), ensure_ascii=False)
-
-
 def tested_nodes_to_json(nodes: list[TestedNode]) -> str:
     return json.dumps([asdict(node) for node in nodes], ensure_ascii=False)
 

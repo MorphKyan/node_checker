@@ -23,6 +23,7 @@ def make_node_fingerprint(node: ProxyNode) -> str:
             "obfs_password": node.obfs_password,
             "up_mbps": node.up_mbps,
             "down_mbps": node.down_mbps,
+            "ports": node.ports,
         }
     else:
         identity = {

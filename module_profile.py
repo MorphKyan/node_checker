@@ -415,7 +415,7 @@ class NodeProfileAggregator:
         risk_score_weight = 0.0
 
         for verdict in verdicts:
-            weight = source_weights.get(verdict.source, 1.0)
+            weight = source_weights.get(verdict.site_id or verdict.source, 1.0)
             for item in verdict.network_labels:
                 if item.label in NETWORK_LABELS and item.label != "unknown":
                     network_scores[item.label] += item.confidence * weight

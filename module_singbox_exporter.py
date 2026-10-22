@@ -9,15 +9,8 @@ def strip_comments(json_str: str) -> str:
     Strips single-line (// ...) and multi-line (/* ... */) comments from JSON
     without affecting comments inside string literals.
     """
-    pattern = r"(\".*?(?<!\\)\")|(/\*.*?\*/|//[^\r\n]*)"
-    regex = re.compile(pattern, re.MULTILINE | re.DOTALL)
-    
-    def replacer(match):
-        if match.group(2) is not None:
-            return ""  # It's a comment, replace with empty string
-        return match.group(1)  # It's a string, keep it as-is
-        
-    return regex.sub(replacer, json_str)
+    pattern = r'("(?:\\.|[^"\\])*")|/\*.*?\*/|//[^\r\n]*'
+    return re.sub(pattern, lambda match: match.group(1) or " ", json_str, flags=re.DOTALL)
 
 
 def _parse_singbox_template(content: str) -> dict:

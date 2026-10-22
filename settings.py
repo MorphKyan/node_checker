@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 
@@ -21,7 +20,6 @@ class Config:
     PROBE_TEST_TIMES = 3  # ping和TTFB测试次数
     
     TUNNEL_START_DELAY = 1.5  # 启动代理内核后的等待时间(秒)
-    TUNNEL_LOCAL_PORT_START = 10000
 
     TCP_PING_TIMEOUT = 3.0
     TTFB_TIMEOUT = 5.0
@@ -49,17 +47,6 @@ class Config:
 
     # 本地 API 服务
     DATA_DIR = os.getenv("DATA_DIR", str(BASE_DIR / "data"))
-    API_HOST = "127.0.0.1"
-    API_PORT = 8000
     API_DEFAULT_SPEEDTEST_LIMIT = 0
-
-    @classmethod
-    def load_from_file(cls, filepath="config.json"):
-        if os.path.exists(filepath):
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for k, v in data.items():
-                    if hasattr(cls, k):
-                        setattr(cls, k, v)
 
 settings = Config()

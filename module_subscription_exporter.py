@@ -190,20 +190,21 @@ class SubscriptionExporter:
 
     @staticmethod
     def deduplicate_names(names: list[str], max_length: int) -> list[str]:
-        seen: dict[str, int] = {}
+        seen: set[str] = set()
+        counts: dict[str, int] = {}
         result = []
 
         for name in names:
-            count = seen.get(name, 0) + 1
-            seen[name] = count
-
-            if count == 1:
-                result.append(name)
-                continue
-
-            suffix = f" #{count}"
-            trimmed_base = truncate_visual(name, max_length - get_visual_width(suffix))
-            result.append(f"{trimmed_base}{suffix}")
+            candidate = truncate_visual(name, max_length)
+            count = counts.get(name, 1)
+            while candidate in seen:
+                count += 1
+                suffix = f" #{count}"
+                trimmed_base = truncate_visual(name, max_length - get_visual_width(suffix))
+                candidate = f"{trimmed_base}{suffix}"
+            counts[name] = count
+            seen.add(candidate)
+            result.append(candidate)
 
         return result
 

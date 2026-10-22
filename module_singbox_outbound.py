@@ -19,6 +19,12 @@ def singbox_outbound(node: ProxyNode, tag: str) -> dict:
         }
         if getattr(node, "sni", ""):
             outbound["tls"]["server_name"] = node.sni
+        if node.ports:
+            outbound.pop("server_port")
+            outbound["server_ports"] = []
+            for ports in node.ports.split(","):
+                ports = ports.strip().replace("-", ":")
+                outbound["server_ports"].append(ports if ":" in ports else f"{ports}:{ports}")
         if getattr(node, "obfs", ""):
             outbound["obfs"] = {
                 "type": node.obfs,
@@ -80,5 +86,7 @@ def singbox_outbound(node: ProxyNode, tag: str) -> dict:
             if getattr(node, "path", ""):
                 transport["service_name"] = node.path
             outbound["transport"] = transport
+        elif vless_type != "tcp":
+            raise ValueError(f"Unsupported sing-box transport: {vless_type}")
 
     return outbound

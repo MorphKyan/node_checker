@@ -125,11 +125,6 @@ class ApiStore:
         cls._atomic_write(cls.config_path(), config)
 
     @classmethod
-    def default_singbox_template(cls) -> str:
-        path = Path(__file__).resolve().parent / "examples" / "singbox_template.yaml"
-        return path.read_text(encoding="utf-8")
-
-    @classmethod
     def get_runtime_settings(cls) -> dict[str, Any]:
         return deepcopy(cls._config().get("runtime_settings", {}))
 

@@ -29,6 +29,8 @@ class TunnelController:
         if isinstance(node, SsNode):
             outbound = xray_shadowsocks_outbound(node, "ss-out")
         elif isinstance(node, Hy2Node) or getattr(node, "protocol", "vless") in {"hy2", "hysteria2"}:
+            if node.obfs or node.obfs_password or node.ports or node.up_mbps is not None or node.down_mbps is not None:
+                raise ValueError("Xray Hysteria2 options are unsupported: obfs, ports, up/down bandwidth; use sing-box")
             outbound = {
                 "protocol": "hysteria",
                 "tag": "hy2-out",
@@ -119,6 +121,8 @@ class TunnelController:
                     "host": getattr(node, "host", "") or "",
                     "mode": getattr(node, "mode", "") or "auto"
                 }
+            elif node_type != "tcp":
+                raise ValueError(f"Unsupported Xray transport: {node_type}")
 
         config = {
             "log": {"loglevel": "warning"},

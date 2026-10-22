@@ -39,6 +39,8 @@ SG
 
 - 解析 VLESS、Hysteria2（hy2 / hysteria2）和 Shadowsocks（ss）订阅，支持混合明文 URI 列表和 base64 订阅内容。
 - SS 支持 SIP002（Base64URL 或明文转义凭据）、旧版整段 Base64、IPv6 和 SS2022；可通过 Xray / sing-box 检测，并导出增强 URI、sing-box 配置。SIP003 插件参数保留并传给 sing-box，Xray 遇到插件会明确拒绝。
+- VLESS 的 TCP、WebSocket、gRPC 可用于两种内核；XHTTP 使用 Xray 检测，导出为 sing-box 配置时会返回 422，不会静默转换为 TCP。
+- Hysteria2 的混淆、上下行带宽和 `ports` 端口跳跃参数由 sing-box 保留；Xray 检测遇到这些参数会明确拒绝，请选用 sing-box。
 - 检测 TCP Ping、TTFB、出口 IP、实际地区、ASN、绕路和骨干网信息。
 - 查询 IP 情报并生成节点画像，包括网络分类、类型分类、风险分和证据。
 - 节点是否有效仅由 TTFB 决定；IP 情报 API 只提供画像与风险证据。
@@ -105,7 +107,7 @@ IP 情报 API 对「家宽」「机房」「VPN」的判断不是绝对事实。
 python -m pip install -r requirements.txt
 ```
 
-项目会使用本地 `sing-box.exe` 启动临时代理隧道。如果文件不存在，现有 setup 流程会尝试准备运行环境。
+项目会使用当前选择的 `sing-box` 或 `Xray` 启动临时代理隧道。Windows amd64 下缺少所选内核时会自动下载，请求超时为 30 秒；API 在后台线程中准备内核，期间仍可查看状态或取消任务。
 
 ## 可选 API 配置
 

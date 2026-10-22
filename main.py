@@ -1,7 +1,7 @@
 import asyncio
 import os
 from settings import settings
-from module_setup import setup_singbox
+from module_setup import setup_singbox, setup_xray
 from module_parser import NodeParser
 from module_exporter import ResultExporter
 from module_cache import ProbeCache
@@ -11,7 +11,7 @@ from module_api_store import ApiStore
 
 
 async def main():
-    setup_singbox()
+    await asyncio.to_thread(setup_xray if settings.PROXY_CORE == "xray" else setup_singbox)
     await ProbeCache.init_db()
     
     sub_url = input("Enter subscription URL or file path (leave empty for inputs/test.txt): ").strip()

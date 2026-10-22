@@ -1,5 +1,9 @@
 import type { JobStatus, NodeResult } from "./types";
 
+export function stripComments(content: string): string {
+  return content.replace(/("(?:\\.|[^"\\])*")|\/\*.*?\*\/|\/\/[^\r\n]*/gs, (_match, quoted: string | undefined) => quoted || " ");
+}
+
 export function formatTime(timestamp?: number | null): string {
   if (!timestamp) return "-";
   return new Date(timestamp * 1000).toLocaleString();

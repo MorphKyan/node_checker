@@ -34,10 +34,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ApiError, createApiClient, enhancedUrl, singboxUrl } from "./api";
+import { ApiError, createApiClient, enhancedUrl } from "./api";
 import type { ApiClient } from "./api";
 import { useAppData } from "./appData";
-import { duration, formatTime, groupCount, riskBuckets, statusTone } from "./appUtils";
+import { duration, formatTime, groupCount, riskBuckets, statusTone, stripComments } from "./appUtils";
 import { filterNodes } from "./nodeFilters";
 import { defaultPreferences, isExportFormat, isExportMode, loadPreferences, savePreferences } from "./preferences";
 import type {
@@ -131,7 +131,6 @@ export default function App() {
   const [exportMode, setExportMode] = useState<ExportMode>(preferences.defaultExportMode);
   const [exportFormat, setExportFormat] = useState<ExportFormat>(preferences.defaultExportFormat);
   const [exportValidOnly, setExportValidOnly] = useState(true);
-  const [exportPreview, setExportPreview] = useState("");
   const [subscriptionForm, setSubscriptionForm] = useState({ name: "", url: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [operationError, setOperationError] = useState("");
@@ -150,6 +149,12 @@ export default function App() {
     resultById.set(subscription.id, (results[index]?.data as SubscriptionResults | null | undefined) || null);
   });
   const selectedResult = effectiveSubscriptionId ? resultById.get(effectiveSubscriptionId) || null : null;
+  const exportPreview = useQuery({
+    queryKey: ["export-preview", preferences.apiBaseUrl, effectiveSubscriptionId, selectedSubscription?.url, selectedResult?.updated_at, exportMode, exportFormat, exportValidOnly],
+    queryFn: () => api.getEnhanced(effectiveSubscriptionId, { mode: exportMode, format: exportFormat, valid_only: exportValidOnly }),
+    enabled: false,
+    retry: false,
+  });
   const allResults = Array.from(resultById.values()).filter(Boolean) as SubscriptionResults[];
   const allNodes = allResults.flatMap((result) => result.nodes);
   const jobList = jobs.map((job) => job.data).filter(Boolean) as JobStatus[];
@@ -284,21 +289,6 @@ export default function App() {
   function setPreferences(next: LocalPreferences) {
     setPreferencesState(next);
     savePreferences(next);
-  }
-
-  async function previewExport() {
-    if (!effectiveSubscriptionId) return;
-    try {
-      const content = await api.getEnhanced(effectiveSubscriptionId, {
-        mode: exportMode,
-        format: exportFormat,
-        valid_only: exportValidOnly,
-      });
-      setOperationError("");
-      setExportPreview(content);
-    } catch (error) {
-      setOperationError(errorMessage(error));
-    }
   }
 
   const geoOptions = Array.from(new Set((selectedResult?.nodes || []).map((node) => node.probe.actual_geo).filter(Boolean)));
@@ -445,13 +435,14 @@ export default function App() {
               mode={exportMode}
               format={exportFormat}
               validOnly={exportValidOnly}
-              preview={exportPreview}
+              preview={exportPreview.isError ? "" : exportPreview.data || ""}
+              error={exportPreview.error ? errorMessage(exportPreview.error) : ""}
               apiBaseUrl={preferences.apiBaseUrl}
               onSelect={setSelectedSubscriptionId}
               onMode={setExportMode}
               onFormat={setExportFormat}
               onValidOnly={setExportValidOnly}
-              onPreview={() => void previewExport()}
+              onPreview={() => void exportPreview.refetch()}
             />
           )}
 
@@ -917,6 +908,7 @@ function ExportView(props: {
   format: ExportFormat;
   validOnly: boolean;
   preview: string;
+  error: string;
   apiBaseUrl: string;
   onSelect: (id: string) => void;
   onMode: (mode: ExportMode) => void;
@@ -933,11 +925,12 @@ function ExportView(props: {
           <FilterSelect label="命名模式" value={props.mode} onChange={(value) => isExportMode(value) && props.onMode(value)} options={[["compact", "compact"], ["detailed", "detailed"]]} />
           <FilterSelect label="格式" value={props.format} onChange={(value) => isExportFormat(value) && props.onFormat(value)} options={[["base64", "base64"], ["plain", "plain"]]} />
           <div><Label>有效节点</Label><Select className="mt-1 w-full" value={String(props.validOnly)} onChange={(event) => props.onValidOnly(event.target.value === "true")}><option value="true">只导出有效</option><option value="false">包含失败</option></Select></div>
-          <div className="flex items-end gap-2"><Button onClick={props.onPreview}><Search className="h-4 w-4" />预览</Button><Button variant="secondary" onClick={() => copyText(url)}><ExternalLink className="h-4 w-4" />复制 URL</Button></div>
+          <div className="flex items-end gap-2"><Button disabled={!props.selectedId} onClick={props.onPreview}><Search className="h-4 w-4" />预览</Button><Button variant="secondary" onClick={() => copyText(url)}><ExternalLink className="h-4 w-4" />复制 URL</Button></div>
         </div>
       </Panel>
       <Panel>
-        <div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">订阅内容</div><div className="flex gap-2"><Button variant="secondary" onClick={() => copyText(props.preview)}><Clipboard className="h-4 w-4" />复制内容</Button><Button variant="secondary" onClick={() => downloadText(`enhanced_${props.mode}_${props.format}.txt`, props.preview)}><Download className="h-4 w-4" />下载</Button></div></div>
+        <div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">订阅内容</div><div className="flex gap-2"><Button variant="secondary" disabled={!props.preview} onClick={() => copyText(props.preview)}><Clipboard className="h-4 w-4" />复制内容</Button><Button variant="secondary" disabled={!props.preview} onClick={() => downloadText(`enhanced_${props.mode}_${props.format}.txt`, props.preview)}><Download className="h-4 w-4" />下载</Button></div></div>
+        {props.error && <div role="alert" className="mb-2 text-sm text-red-600">{props.error}</div>}
         <textarea className="h-96 w-full rounded-md border border-border bg-slate-950 p-3 font-mono text-xs text-slate-50" value={props.preview} readOnly placeholder="点击预览后显示增强订阅内容" />
       </Panel>
       <Panel><div className="text-sm font-semibold">命名示例</div><div className="mt-2 space-y-2 text-sm text-slate-600"><div>🇯🇵 JP | 机房 | Clean | 风险 10 | 210ms</div><div>🇯🇵 JP | 机房 | Clean | 风险 10 | 80ms/210ms | 12.34Mbps | Example ASN | JP</div></div></Panel>
@@ -1232,17 +1225,14 @@ function SingboxView(props: {
   // Editor Draft State
   const [draftName, setDraftName] = useState("");
   const [draftContent, setDraftContent] = useState("");
-  const [lastSelectedId, setLastSelectedId] = useState("");
 
   useEffect(() => {
     if (selectedTemplate) {
       setDraftName(selectedTemplate.name);
       setDraftContent(selectedTemplate.content);
-      setLastSelectedId(selectedTemplate.id);
     } else {
       setDraftName("");
       setDraftContent("");
-      setLastSelectedId("");
     }
   }, [selectedTemplate]);
 
@@ -1250,7 +1240,7 @@ function SingboxView(props: {
   let jsonError = "";
   if (draftContent) {
     try {
-      const clean = stripCommentsLocal(draftContent);
+      const clean = stripComments(draftContent);
       JSON.parse(clean);
     } catch (e: any) {
       jsonError = e.message;
@@ -1269,14 +1259,11 @@ function SingboxView(props: {
   const [previewValidOnly, setPreviewValidOnly] = useState(true);
   const [previewLimit, setPreviewLimit] = useState("");
   const [previewMaxRisk, setPreviewMaxRisk] = useState("");
-  const [generatedConfig, setGeneratedConfig] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [genError, setGenError] = useState("");
 
-  const exportUrl = selectedTemplateId && selectedSubIds.length > 0
+  const exportUrl = selectedTemplate && selectedSubIds.length > 0
     ? props.api.getSingboxExportUrl(
         selectedSubIds,
-        selectedTemplateId,
+        selectedTemplate.id,
         {
           mode: previewMode,
           valid_only: previewValidOnly,
@@ -1286,32 +1273,18 @@ function SingboxView(props: {
       )
     : "";
 
-  async function handlePreview() {
-    if (selectedSubIds.length === 0) {
-      setGenError("请选择至少一个订阅");
-      return;
-    }
-    setIsGenerating(true);
-    setGenError("");
-    try {
-      const res = await api.getSingboxExport(
-        selectedSubIds,
-        selectedTemplateId,
-        {
-          mode: previewMode,
-          valid_only: previewValidOnly,
-          limit: previewLimit ? parseInt(previewLimit) : undefined,
-          max_risk: previewMaxRisk ? parseFloat(previewMaxRisk) : undefined
-        }
-      );
-      const formatted = typeof res === "string" ? res : JSON.stringify(res, null, 2);
-      setGeneratedConfig(formatted);
-    } catch (e: any) {
-      setGenError(e.message || "生成配置失败");
-    } finally {
-      setIsGenerating(false);
-    }
-  }
+  const preview = useQuery({
+    queryKey: ["singbox-preview", exportUrl, selectedTemplate?.content, subscriptions.filter((sub) => selectedSubIds.includes(sub.id)).map((sub) => [sub.id, sub.url, sub.updated_at])],
+    queryFn: () => api.getSingboxExport(selectedSubIds, selectedTemplate?.id, {
+      mode: previewMode,
+      valid_only: previewValidOnly,
+      limit: previewLimit ? parseInt(previewLimit) : undefined,
+      max_risk: previewMaxRisk ? parseFloat(previewMaxRisk) : undefined,
+    }),
+    enabled: false,
+    retry: false,
+  });
+  const generatedConfig = preview.isError || !preview.data ? "" : JSON.stringify(preview.data, null, 2);
 
   return (
     <div className="grid grid-cols-4 gap-4">
@@ -1543,9 +1516,9 @@ function SingboxView(props: {
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <div className="flex gap-2">
-                      <Button onClick={handlePreview} disabled={isGenerating}>
+                      <Button onClick={() => void preview.refetch()} disabled={!exportUrl || preview.isFetching}>
                         <Search className="h-4 w-4 mr-1" />
-                        {isGenerating ? "正在生成..." : "预览生成配置"}
+                        {preview.isFetching ? "正在生成..." : "预览生成配置"}
                       </Button>
                       {generatedConfig && (
                         <>
@@ -1573,9 +1546,9 @@ function SingboxView(props: {
 
                 {/* Preview Textbox */}
                 <div className="flex-1 flex flex-col min-h-[350px]">
-                  {genError && (
+                  {preview.error && (
                     <div className="mb-2 text-xs text-red-500 bg-red-50 p-2 rounded border border-red-200">
-                      {genError}
+                      {errorMessage(preview.error)}
                     </div>
                   )}
                   <textarea
@@ -1596,12 +1569,4 @@ function SingboxView(props: {
       </div>
     </div>
   );
-}
-
-function stripCommentsLocal(json_str: string): string {
-  const pattern = /(\".*?(?<!\\)\")|(\/\*.*?\*\/|\/\/[^\r\n]*)/g;
-  return json_str.replace(pattern, (match, g1, g2) => {
-    if (g2) return "";
-    return g1;
-  });
 }

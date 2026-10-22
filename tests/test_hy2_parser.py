@@ -1,3 +1,4 @@
+from dataclasses import asdict
 import json
 import unittest
 
@@ -5,7 +6,7 @@ from models import Hy2Node, VlessNode, AnalyzedNode, ProbeData, TestedNode
 from module_parser import NodeParser
 from module_tunnel import TunnelController
 from module_subscription_exporter import SubscriptionExporter
-from module_result_codec import tested_nodes_to_json, tested_nodes_from_json
+from module_result_codec import restore_tested_nodes
 
 
 class Hy2ParserTests(unittest.TestCase):
@@ -128,8 +129,7 @@ class Hy2ParserTests(unittest.TestCase):
         analyzed = AnalyzedNode(node=hy2_node, probe=probe, is_valid=True)
         tested = TestedNode(analyzed_node=analyzed)
 
-        json_str = tested_nodes_to_json([tested])
-        restored = tested_nodes_from_json(json_str)
+        restored = restore_tested_nodes(json.loads(json.dumps([asdict(tested)])))
         self.assertEqual(len(restored), 1)
         restored_node = restored[0].analyzed_node.node
         self.assertIsInstance(restored_node, Hy2Node)

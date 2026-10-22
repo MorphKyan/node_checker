@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from api_server import app
-from models import AnalyzedNode, ApiVerdict, NodeProfile, ProbeData, TestedNode, VlessNode
+from models import AnalyzedNode, ApiVerdict, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode
 from module_api_store import ApiStore
 from module_cache import ProbeCache
 from module_analyzer import NodeAnalyzer
@@ -306,6 +306,55 @@ class JsonRefactorTests(unittest.TestCase):
             self.assertEqual(len(only_low.text.splitlines()), 1)
             include_invalid = client.get(f"/subscriptions/{sub['id']}/enhanced?format=plain&max_risk=20&valid_only=false")
             self.assertEqual(len(include_invalid.text.splitlines()), 2)
+
+    def test_export_formats_share_filtering_sorting_and_limit(self):
+        sub = ApiStore.create_subscription("https://filters.example.test/sub")
+        ApiStore.create_singbox_template("test", '{"outbounds":[]}')
+        ApiStore.save_results(sub["id"], [node(None, name="unknown"), node(90, name="high"),
+                                         node(15, valid=False, name="invalid"), node(10, name="low")])
+        with TestClient(app) as client:
+            for filters, names in [({}, ["low", "high", "unknown"]),
+                                   ({"max_risk": 20}, ["low"]),
+                                   ({"max_risk": 20, "valid_only": False}, ["low", "invalid"]),
+                                   ({"limit": 1}, ["low"]), ({"max_risk": 0}, [])]:
+                with self.subTest(filters=filters):
+                    params = {"subscription_id": sub["id"], **filters}
+                    plain = client.get("/subscriptions/enhanced", params={**params, "format": "plain"})
+                    config = client.get("/subscriptions/singbox", params=params)
+                    self.assertEqual(plain.status_code, 200)
+                    self.assertEqual(config.status_code, 200)
+                    self.assertEqual([uri.split("@", 1)[0] for uri in plain.text.splitlines()],
+                                     [f"vless://uuid-{name}" for name in names])
+                    self.assertEqual([out["uuid"] for out in config.json()["outbounds"]],
+                                     [f"uuid-{name}" for name in names])
+
+    def test_enhanced_export_retains_additional_filters(self):
+        sub = ApiStore.create_subscription("https://filters.example.test/sub")
+        item = node(10)
+        item.analyzed_node.probe.profile.network_labels = [LabelEvidence("hosting", 0.9)]
+        item.analyzed_node.probe.profile.risk_labels = [LabelEvidence("vpn", 0.8)]
+        ApiStore.save_results(sub["id"], [item])
+        with TestClient(app) as client:
+            for filters, count in [({"geo": " us, jp ", "network": "机房", "max_ttfb": 120}, 1),
+                                   ({"geo": "US"}, 0), ({"network": "residential"}, 0),
+                                   ({"exclude_type": "VPN"}, 0), ({"max_ttfb": 119}, 0)]:
+                with self.subTest(filters=filters):
+                    response = client.get(f"/subscriptions/{sub['id']}/enhanced",
+                                          params={"format": "plain", **filters})
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(len(response.text.splitlines()), count)
+
+    def test_frontend_root_and_routes_share_index_fallback(self):
+        dist = Path(self.temp.name) / "dist"
+        dist.mkdir()
+        with patch("api_server.frontend_dist_dir", return_value=dist), TestClient(app) as client:
+            for path in ("/", "/dashboard"):
+                self.assertEqual(client.get(path).status_code, 404)
+            (dist / "index.html").write_text("frontend index", encoding="utf-8")
+            (dist / "app.js").write_text("frontend asset", encoding="utf-8")
+            for path in ("/", "/dashboard"):
+                self.assertEqual(client.get(path).text, "frontend index")
+            self.assertEqual(client.get("/app.js").text, "frontend asset")
 
     def test_ttfb_alone_controls_validity_and_all_failed_apis_have_null_risk(self):
         raw = node().analyzed_node.node

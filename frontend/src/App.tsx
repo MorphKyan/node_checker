@@ -66,6 +66,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
   { id: "export", label: "增强订阅", icon: FileDown },
   { id: "singbox", label: "Sing-box 配置", icon: FileCode },
   { id: "settings", label: "设置", icon: Settings },
+  { id: "api-sites", label: "API 站点", icon: SlidersHorizontal },
 ];
 
 const chartColors = ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#64748b"];
@@ -250,8 +251,7 @@ export default function App() {
   const templates = singboxTemplatesQuery.data || [];
 
   const createTemplate = useMutation({
-    mutationFn: ({ name, content }: { name: string; content: string }) =>
-      api.createSingboxTemplate({ name, content }),
+    mutationFn: api.createSingboxTemplate,
     onSuccess: () => {
       setOperationError("");
       void queryClient.invalidateQueries({ queryKey: ["singbox-templates"] });
@@ -270,7 +270,7 @@ export default function App() {
   });
 
   const deleteTemplate = useMutation({
-    mutationFn: (id: string) => api.deleteSingboxTemplate(id),
+    mutationFn: api.deleteSingboxTemplate,
     onSuccess: () => {
       setOperationError("");
       void queryClient.invalidateQueries({ queryKey: ["singbox-templates"] });
@@ -310,9 +310,6 @@ export default function App() {
               </button>
             );
           })}
-          <button onClick={() => setView("api-sites")} className={`flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm font-medium transition ${view === "api-sites" ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"}`}>
-            <SlidersHorizontal className="h-4 w-4" />API 站点
-          </button>
         </nav>
       </aside>
 
@@ -1174,13 +1171,8 @@ function SingboxView(props: {
   const [draftContent, setDraftContent] = useState("");
 
   useEffect(() => {
-    if (selectedTemplate) {
-      setDraftName(selectedTemplate.name);
-      setDraftContent(selectedTemplate.content);
-    } else {
-      setDraftName("");
-      setDraftContent("");
-    }
+    setDraftName(selectedTemplate?.name || "");
+    setDraftContent(selectedTemplate?.content || "");
   }, [selectedTemplate]);
 
   // JSON Validation
@@ -1207,27 +1199,19 @@ function SingboxView(props: {
   const [previewLimit, setPreviewLimit] = useState("");
   const [previewMaxRisk, setPreviewMaxRisk] = useState("");
 
+  const exportParams = {
+    mode: previewMode,
+    valid_only: previewValidOnly,
+    limit: previewLimit ? parseInt(previewLimit) : undefined,
+    max_risk: previewMaxRisk ? parseFloat(previewMaxRisk) : undefined,
+  };
   const exportUrl = selectedTemplate && selectedSubIds.length > 0
-    ? props.api.getSingboxExportUrl(
-        selectedSubIds,
-        selectedTemplate.id,
-        {
-          mode: previewMode,
-          valid_only: previewValidOnly,
-          limit: previewLimit ? parseInt(previewLimit) : undefined,
-          max_risk: previewMaxRisk ? parseFloat(previewMaxRisk) : undefined
-        }
-      )
+    ? api.getSingboxExportUrl(selectedSubIds, selectedTemplate.id, exportParams)
     : "";
 
   const preview = useQuery({
     queryKey: ["singbox-preview", exportUrl, selectedTemplate?.content, subscriptions.filter((sub) => selectedSubIds.includes(sub.id)).map((sub) => [sub.id, sub.url, sub.updated_at])],
-    queryFn: () => api.getSingboxExport(selectedSubIds, selectedTemplate?.id, {
-      mode: previewMode,
-      valid_only: previewValidOnly,
-      limit: previewLimit ? parseInt(previewLimit) : undefined,
-      max_risk: previewMaxRisk ? parseFloat(previewMaxRisk) : undefined,
-    }),
+    queryFn: () => api.getSingboxExport(selectedSubIds, selectedTemplate?.id, exportParams),
     enabled: false,
     retry: false,
   });

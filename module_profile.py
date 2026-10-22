@@ -367,7 +367,7 @@ class ProfileAdapters:
         elif usage_upper in {"COM", "ORG", "EDU", "GOV", "MIL"}:
             network_labels.append(_label("business", 0.55))
 
-        proxy = data.get("proxy") if isinstance(data.get("proxy"), dict) else {}
+        proxy = _mapping(data.get("proxy"))
         proxy_type = str(proxy.get("proxy_type") or data.get("proxy_type") or "").strip().upper()
         if data.get("is_proxy") is True:
             risk_labels.append(_label("proxy", 0.80))
@@ -443,14 +443,11 @@ class NodeProfileAggregator:
         if any(item.label != "clean" for item in risk_labels):
             risk_labels = [item for item in risk_labels if item.label != "clean"]
 
-        if not network_labels and not risk_labels:
-            display_labels = ["未知"]
-        else:
-            display_labels = [
-                DISPLAY_LABELS[item.label]
-                for item in network_labels + risk_labels
-                if item.label != "unknown"
-            ] or ["未知"]
+        display_labels = [
+            DISPLAY_LABELS[item.label]
+            for item in network_labels + risk_labels
+            if item.label != "unknown"
+        ] or ["未知"]
 
         top_confidence = max(
             [i.confidence for i in network_labels + risk_labels],

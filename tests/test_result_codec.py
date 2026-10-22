@@ -1,8 +1,9 @@
+import json
 import unittest
 from dataclasses import asdict
 
 from models import AnalyzedNode, ApiVerdict, Hy2Node, LabelEvidence, NodeProfile, ProbeData, SsNode, TestedNode, VlessNode
-from module_result_codec import restore_probe_data, restore_proxy_node, tested_nodes_from_json as _tested_nodes_from_json, tested_nodes_to_json as _tested_nodes_to_json
+from module_result_codec import restore_probe_data, restore_proxy_node, restore_tested_nodes
 
 
 def make_node() -> TestedNode:
@@ -53,7 +54,7 @@ class ResultCodecTests(unittest.TestCase):
                 self.assertEqual(restore_proxy_node(data), original)
 
     def test_round_trips_tested_nodes_with_profile_evidence(self):
-        restored = _tested_nodes_from_json(_tested_nodes_to_json([make_node()]))
+        restored = restore_tested_nodes(json.loads(json.dumps([asdict(make_node())])))
 
         profile = restored[0].analyzed_node.probe.profile
         self.assertIsInstance(profile.network_labels[0], LabelEvidence)
@@ -94,7 +95,7 @@ class ResultCodecTests(unittest.TestCase):
         node.analyzed_node.probe.ipv6_support = True
         node.analyzed_node.probe.actual_ipv6 = "2001:db8::1"
 
-        restored = _tested_nodes_from_json(_tested_nodes_to_json([node]))
+        restored = restore_tested_nodes(json.loads(json.dumps([asdict(node)])))
         restored_probe = restored[0].analyzed_node.probe
         self.assertTrue(restored_probe.ipv6_support)
         self.assertEqual(restored_probe.actual_ipv6, "2001:db8::1")

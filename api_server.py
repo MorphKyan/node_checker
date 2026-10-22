@@ -135,14 +135,6 @@ def schedule_refresh_response(
     }
 
 
-def latest_result_or_409(subscription_id: str) -> dict:
-    ensure_subscription(subscription_id)
-    result = ApiStore.get_latest_result(subscription_id)
-    if not result:
-        raise HTTPException(status_code=409, detail="No completed result is available")
-    return result
-
-
 def normalize_filter_values(values: Optional[list[str]]) -> set[str]:
     if not values:
         return set()
@@ -218,19 +210,17 @@ def aggregate_subscription_nodes(subscription_ids: list[str]) -> list:
     return list(aggregated_nodes_map.values())
 
 
-def build_enhanced_subscription_response(
+def select_subscription_nodes(
     subscription_ids: list[str],
     *,
     limit: Optional[int],
     max_risk: Optional[float],
-    mode: Literal["compact", "detailed"],
-    format: Literal["base64", "plain"],
     valid_only: bool,
-    geo: Optional[list[str]],
-    network: Optional[list[str]],
-    exclude_type: Optional[list[str]],
-    max_ttfb: Optional[float],
-) -> PlainTextResponse:
+    geo: Optional[list[str]] = None,
+    network: Optional[list[str]] = None,
+    exclude_type: Optional[list[str]] = None,
+    max_ttfb: Optional[float] = None,
+) -> list:
     aggregated_nodes = aggregate_subscription_nodes(subscription_ids)
 
     filtered_nodes = []
@@ -256,6 +246,26 @@ def build_enhanced_subscription_response(
     sorted_nodes = SubscriptionExporter.sort_nodes(filtered_nodes, valid_only=False)
     if limit is not None:
         sorted_nodes = sorted_nodes[:limit]
+    return sorted_nodes
+
+
+def build_enhanced_subscription_response(
+    subscription_ids: list[str],
+    *,
+    limit: Optional[int],
+    max_risk: Optional[float],
+    mode: Literal["compact", "detailed"],
+    format: Literal["base64", "plain"],
+    valid_only: bool,
+    geo: Optional[list[str]],
+    network: Optional[list[str]],
+    exclude_type: Optional[list[str]],
+    max_ttfb: Optional[float],
+) -> PlainTextResponse:
+    sorted_nodes = select_subscription_nodes(
+        subscription_ids, limit=limit, max_risk=max_risk, valid_only=valid_only,
+        geo=geo, network=network, exclude_type=exclude_type, max_ttfb=max_ttfb,
+    )
 
     plain = build_plain_subscription(sorted_nodes, mode=mode, valid_only=False)
     if format == "plain":
@@ -360,20 +370,9 @@ async def get_singbox_subscription(
             raise HTTPException(status_code=400, detail="No templates available")
         template = templates[0]
 
-    aggregated_nodes = aggregate_subscription_nodes(subscription_ids)
-
-    filtered_nodes = []
-    for node in aggregated_nodes:
-        if valid_only and not node.analyzed_node.is_valid:
-            continue
-        risk = node.analyzed_node.probe.profile.risk_score
-        if max_risk is not None and (risk is None or risk > max_risk):
-            continue
-        filtered_nodes.append(node)
-
-    sorted_nodes = SubscriptionExporter.sort_nodes(filtered_nodes, valid_only=False)
-    if limit is not None:
-        sorted_nodes = sorted_nodes[:limit]
+    sorted_nodes = select_subscription_nodes(
+        subscription_ids, limit=limit, max_risk=max_risk, valid_only=valid_only,
+    )
 
     try:
         config = generate_singbox_config(
@@ -428,7 +427,9 @@ async def delete_subscription(subscription_id: str) -> dict:
 @app.get("/subscriptions/{subscription_id}/results")
 async def get_subscription_results(subscription_id: str) -> dict:
     subscription = ensure_subscription(subscription_id)
-    result = latest_result_or_409(subscription_id)
+    result = ApiStore.get_latest_result(subscription_id)
+    if not result:
+        raise HTTPException(status_code=409, detail="No completed result is available")
     return {
         "subscription_id": subscription_id,
         "status": "completed",
@@ -590,10 +591,7 @@ def frontend_dist_dir() -> Path:
 
 @app.get("/")
 async def serve_frontend_root():
-    index_path = frontend_dist_dir() / "index.html"
-    if not index_path.exists():
-        raise HTTPException(status_code=404, detail="Frontend build not found")
-    return FileResponse(index_path)
+    return await serve_frontend_asset_or_route("")
 
 
 @app.get("/{path:path}")

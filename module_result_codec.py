@@ -1,5 +1,4 @@
-import json
-from dataclasses import asdict, fields
+from dataclasses import fields
 
 from models import ApiVerdict, AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode, Hy2Node, ProxyNode, SsNode
 
@@ -71,20 +70,11 @@ def restore_probe_data(data: dict) -> ProbeData:
     return ProbeData(**data)
 
 
-def tested_nodes_to_json(nodes: list[TestedNode]) -> str:
-    return json.dumps([asdict(node) for node in nodes], ensure_ascii=False)
-
-
-def tested_nodes_from_json(payload: str) -> list[TestedNode]:
-    return restore_tested_nodes(json.loads(payload))
-
-
 def restore_tested_nodes(data: list[dict]) -> list[TestedNode]:
     restored = []
     for item in data:
         analyzed_data = item["analyzed_node"]
-        node_data = dict(analyzed_data["node"])
-        node = restore_proxy_node(node_data)
+        node = restore_proxy_node(analyzed_data["node"])
         probe = restore_probe_data(analyzed_data["probe"])
         analyzed = AnalyzedNode(
             node=node,

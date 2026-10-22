@@ -8,8 +8,7 @@ import unittest
 from models import SsNode, AnalyzedNode, ProbeData, TestedNode
 from module_parser import NodeParser
 from module_node_identity import make_node_fingerprint
-from module_result_codec import restore_proxy_node
-from module_result_codec import tested_nodes_from_json as decode_results, tested_nodes_to_json as encode_results
+from module_result_codec import restore_proxy_node, restore_tested_nodes
 from module_shadowsocks import singbox_shadowsocks_outbound
 from module_singbox_exporter import generate_singbox_config
 from module_subscription_exporter import SubscriptionExporter
@@ -88,7 +87,7 @@ class ShadowsocksTests(unittest.TestCase):
                     os.unlink(path)
 
     def test_codec_and_connection_fingerprint(self):
-        restored = decode_results(encode_results([self.tested]))[0].analyzed_node.node
+        restored = restore_tested_nodes(json.loads(json.dumps([asdict(self.tested)])))[0].analyzed_node.node
         self.assertEqual(restored, self.node)
         data = asdict(self.node)
         del data['protocol']

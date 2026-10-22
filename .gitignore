@@ -21,3 +21,6 @@ frontend/dist/
 frontend/*.tsbuildinfo
 
 data/
+
+# Local subscription links contain credentials.
+/inputs/test.txt

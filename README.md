@@ -139,6 +139,8 @@ Enter subscription URL or file path (leave empty for inputs/test.txt):
 inputs/test.txt
 ```
 
+请自行创建该文件并填入订阅内容；它已被 Git 忽略，避免提交节点凭证。
+
 如果本地文件内容本身是单行 URL，程序会自动拉取该 URL 对应的订阅内容。
 
 ## CLI 输出

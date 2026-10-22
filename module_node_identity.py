@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from models import ProxyNode, Hy2Node, VlessNode, SsNode
+from models import ProxyNode, Hy2Node, SsNode
 
 
 def make_node_fingerprint(node: ProxyNode) -> str:
@@ -45,12 +45,3 @@ def make_node_fingerprint(node: ProxyNode) -> str:
         }
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def make_node_identity(node: ProxyNode) -> str:
-    identity = {
-        "protocol": getattr(node, "protocol", "vless"),
-        "server": f"{node.server_ip}:{node.server_port}",
-        "sni": getattr(node, "sni", ""),
-    }
-    return json.dumps(identity, sort_keys=True, ensure_ascii=False)

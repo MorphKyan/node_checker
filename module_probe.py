@@ -56,11 +56,6 @@ class LightweightProbe:
             return False, ""
 
     @staticmethod
-    async def trace_route(ip: str) -> tuple[str, bool | None, bool | None, str]:
-        # shortcut: route measurement is not implemented; keep results unknown until it is.
-        return "", None, None, ""
-
-    @staticmethod
     async def _fetch_exit_ip(socks5_url: str, endpoint: str) -> tuple[str, dict | None]:
         try:
             connector = ProxyConnector.from_url(socks5_url, rdns=True)
@@ -149,23 +144,21 @@ class LightweightProbe:
                 "api_sites": api_sites,
                 "exit_ip_endpoint": ApiStore.get_exit_ip_endpoint(),
             }
-        tcp, ttfb, trace, ipv6, intelligence = await asyncio.gather(
+        tcp, ttfb, ipv6, intelligence = await asyncio.gather(
             LightweightProbe.tcp_ping(node.server_ip, node.server_port),
             LightweightProbe.test_ttfb(socks5_url, settings.TTFB_TARGET_URL),
-            LightweightProbe.trace_route(node.server_ip),
             LightweightProbe.detect_ipv6(socks5_url),
             LightweightProbe._ip_intelligence(socks5_url, probe_config),
             return_exceptions=True,
         )
         if isinstance(tcp, BaseException): tcp = 9999.0
         if isinstance(ttfb, BaseException): ttfb = 9999.0
-        if isinstance(trace, BaseException): trace = ("", None, None, "")
         if isinstance(ipv6, BaseException): ipv6 = (False, "")
         if isinstance(intelligence, BaseException): intelligence = ("", "Unknown", "", NodeProfile())
         actual_ip, geo, asn, profile = intelligence
         return ProbeData(
             tcp_ping_ms=tcp, ttfb_ms=ttfb, actual_ip=actual_ip,
             actual_geo=geo, asn_org=asn,
-            trace_path=trace[0], is_detour=trace[1], is_backbone=trace[2], backbone_info=trace[3],
+            # shortcut: route measurement is not implemented; keep unknown defaults until it is.
             profile=profile, ipv6_support=ipv6[0], actual_ipv6=ipv6[1],
         )

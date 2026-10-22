@@ -66,7 +66,6 @@ export interface ApiClient {
   updateExitIpEndpoint(exit_ip_endpoint: string): Promise<{ exit_ip_endpoint: string }>;
 
   listSingboxTemplates(): Promise<SingboxTemplate[]>;
-  getSingboxTemplate(id: string): Promise<SingboxTemplate>;
   createSingboxTemplate(input: { name: string; content: string }): Promise<SingboxTemplate>;
   updateSingboxTemplate(id: string, input: { name?: string; content?: string }): Promise<SingboxTemplate>;
   deleteSingboxTemplate(id: string): Promise<{ deleted: boolean; template_id: string }>;
@@ -158,7 +157,6 @@ export function createApiClient(baseUrl: string): ApiClient {
     updateExitIpEndpoint: (exit_ip_endpoint) => request(baseUrl, "/exit-ip-endpoint", { method: "PATCH", body: JSON.stringify({ exit_ip_endpoint }) }),
 
     listSingboxTemplates: () => request(baseUrl, "/singbox/templates"),
-    getSingboxTemplate: (id) => request(baseUrl, `/singbox/templates/${pathSegment(id)}`),
     createSingboxTemplate: (input) =>
       request(baseUrl, "/singbox/templates", {
         method: "POST",
@@ -173,19 +171,8 @@ export function createApiClient(baseUrl: string): ApiClient {
       request(baseUrl, `/singbox/templates/${pathSegment(id)}`, {
         method: "DELETE",
       }),
-    getSingboxExport: (subscriptionIds, templateId, params) => {
-      const query = new URLSearchParams();
-      subscriptionIds.forEach((id) => query.append("subscription_id", id));
-      if (templateId) query.append("template_id", templateId);
-      if (params?.mode) query.append("mode", params.mode);
-      if (params?.valid_only !== undefined) query.append("valid_only", String(params.valid_only));
-      if (params?.limit !== undefined) query.append("limit", String(params.limit));
-      if (params?.max_risk !== undefined) query.append("max_risk", String(params.max_risk));
-      return request(baseUrl, `/subscriptions/singbox?${query.toString()}`);
-    },
-    getSingboxExportUrl: (subscriptionIds, templateId, params) => {
-      return singboxUrl(baseUrl, subscriptionIds, templateId, params);
-    },
+    getSingboxExport: (subscriptionIds, templateId, params) => request(baseUrl, singboxPath(subscriptionIds, templateId, params)),
+    getSingboxExportUrl: (subscriptionIds, templateId, params) => singboxUrl(baseUrl, subscriptionIds, templateId, params),
   };
 }
 
@@ -205,8 +192,7 @@ export function enhancedUrl(baseUrl: string, id: string | string[], params: { mo
   return new URL(joinUrl(baseUrl, enhancedPath(id, params)), window.location.origin).href;
 }
 
-export function singboxUrl(
-  baseUrl: string,
+function singboxPath(
   subscriptionIds: string[],
   templateId?: string,
   params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }
@@ -218,5 +204,14 @@ export function singboxUrl(
   if (params?.valid_only !== undefined) query.append("valid_only", String(params.valid_only));
   if (params?.limit !== undefined) query.append("limit", String(params.limit));
   if (params?.max_risk !== undefined) query.append("max_risk", String(params.max_risk));
-  return new URL(joinUrl(baseUrl, `/subscriptions/singbox?${query.toString()}`), window.location.origin).href;
+  return `/subscriptions/singbox?${query.toString()}`;
+}
+
+export function singboxUrl(
+  baseUrl: string,
+  subscriptionIds: string[],
+  templateId?: string,
+  params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }
+): string {
+  return new URL(joinUrl(baseUrl, singboxPath(subscriptionIds, templateId, params)), window.location.origin).href;
 }

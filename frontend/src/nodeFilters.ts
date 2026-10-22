@@ -14,8 +14,8 @@ export interface NodeFilters {
 }
 
 export function filterNodes(nodes: NodeResult[], filters: NodeFilters): NodeResult[] {
+  const search = filters.nodeSearch.trim().toLowerCase();
   return nodes.filter((node) => {
-    const search = filters.nodeSearch.trim().toLowerCase();
     const searchableText = `${node.original_name} ${node.enhanced_name_compact} ${node.probe.actual_ip} ${node.probe.asn_org}`.toLowerCase();
     if (search && !searchableText.includes(search)) return false;
     if (filters.nodeValidity === "valid" && !node.is_valid) return false;

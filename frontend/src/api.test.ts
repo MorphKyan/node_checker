@@ -31,6 +31,31 @@ describe("api client", () => {
     expect(enhancedUrl("http://api.local", "sub_1", { mode: "compact", format: "plain", valid_only: true })).toMatch(/^http:\/\/api.local\/subscriptions\/enhanced/);
   });
 
+  it("uses the same sing-box options for preview requests and export URLs", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", {
+      headers: { "content-type": "application/json" },
+    })));
+    try {
+      for (const baseUrl of ["", "http://api.local/prefix/"]) {
+        const client = createApiClient(baseUrl);
+        const ids = ["sub/one", "sub two"];
+        const templateId = "template & one";
+        const params = { mode: "detailed", valid_only: false, limit: 1, max_risk: 0 };
+        await client.getSingboxExport(ids, templateId, params);
+        const requestUrl = vi.mocked(fetch).mock.calls.at(-1)![0];
+        const exportUrl = client.getSingboxExportUrl(ids, templateId, params);
+        expect(new URL(String(requestUrl), window.location.origin).href).toBe(exportUrl);
+        const query = new URL(exportUrl).searchParams;
+        expect(query.getAll("subscription_id")).toEqual(ids);
+        expect(query.get("template_id")).toBe(templateId);
+        expect(query.get("valid_only")).toBe("false");
+        expect(query.get("max_risk")).toBe("0");
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("passes enhanced export limits to preview requests", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("payload", {
       status: 200,

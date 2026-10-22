@@ -209,6 +209,13 @@ class SubscriptionExporter:
         return result
 
     @staticmethod
+    def build_names(nodes: list[TestedNode], mode: str, max_length: int) -> list[str]:
+        return SubscriptionExporter.deduplicate_names(
+            [SubscriptionExporter.build_remark(node, mode, max_length) for node in nodes],
+            max_length,
+        )
+
+    @staticmethod
     def build_uris(
         nodes: list[TestedNode],
         mode: str,
@@ -216,11 +223,7 @@ class SubscriptionExporter:
         valid_only: bool = True,
     ) -> list[str]:
         sorted_nodes = SubscriptionExporter.sort_nodes(nodes, valid_only=valid_only)
-        remarks = [
-            SubscriptionExporter.build_remark(node, mode, max_name_length)
-            for node in sorted_nodes
-        ]
-        remarks = SubscriptionExporter.deduplicate_names(remarks, max_name_length)
+        remarks = SubscriptionExporter.build_names(sorted_nodes, mode, max_name_length)
         return [
             SubscriptionExporter.rewrite_vless_remark(node.analyzed_node.node.raw_uri, remark)
             for node, remark in zip(sorted_nodes, remarks)

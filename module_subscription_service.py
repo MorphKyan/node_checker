@@ -47,11 +47,6 @@ class SubscriptionRefreshService:
                 condition.notify_all()
 
     @staticmethod
-    def freeze_probe_config(probe_config: dict | None = None, api_sites: list[dict] | None = None) -> dict:
-        """Return the one probe configuration every node in this batch shares."""
-        return ProbeCache.probe_config_snapshot(probe_config, api_sites)
-
-    @staticmethod
     def select_speedtest_nodes_per_region(
         analyzed_nodes: list[AnalyzedNode],
         speedtest_limit: int,
@@ -106,7 +101,7 @@ class SubscriptionRefreshService:
         # Direct callers must get the same immutable per-node snapshot as
         # run_nodes; otherwise cache lookup and the ensuing probe can observe
         # different site configurations.
-        probe_config = SubscriptionRefreshService.freeze_probe_config(probe_config, api_sites)
+        probe_config = ProbeCache.probe_config_snapshot(probe_config, api_sites)
         async with sem:
             signature = ProbeCache.config_signature(probe_config=probe_config)
             process = None
@@ -167,7 +162,7 @@ class SubscriptionRefreshService:
         probe_config: dict | None = None,
     ) -> list[TestedNode]:
         # Freeze once for every caller (including CLI) before cache/probe work.
-        probe_config = cls.freeze_probe_config(probe_config, api_sites)
+        probe_config = ProbeCache.probe_config_snapshot(probe_config, api_sites)
         processed = 0
 
         async def filter_with_progress(node: ProxyNode) -> AnalyzedNode:

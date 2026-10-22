@@ -45,11 +45,7 @@ def generate_singbox_config(
 
     # 2. Sort and build remark tags for the tested nodes
     sorted_nodes = SubscriptionExporter.sort_nodes(tested_nodes, valid_only=False)
-    remarks = [
-        SubscriptionExporter.build_remark(node, mode, max_name_length)
-        for node in sorted_nodes
-    ]
-    remarks = SubscriptionExporter.deduplicate_names(remarks, max_name_length)
+    remarks = SubscriptionExporter.build_names(sorted_nodes, mode, max_name_length)
 
     # 3. Create outbound configurations for nodes
     node_outbounds = []

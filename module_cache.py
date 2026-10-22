@@ -5,23 +5,15 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from models import ProbeData, ProxyNode, VlessNode
+from models import ProbeData, ProxyNode
 from module_api_store import ApiStore
-from module_node_identity import make_node_fingerprint, make_node_identity
+from module_node_identity import make_node_fingerprint
 from module_result_codec import restore_probe_data
 from settings import settings
 
 
 class ProbeCache:
     _write_lock = asyncio.Lock()
-
-    @staticmethod
-    def make_node_fingerprint(node: ProxyNode) -> str:
-        return make_node_fingerprint(node)
-
-    @staticmethod
-    def make_node_identity(node: ProxyNode) -> str:
-        return make_node_identity(node)
 
     @staticmethod
     def probe_config_snapshot(probe_config=None, api_sites=None) -> dict:
@@ -40,12 +32,8 @@ class ProbeCache:
 
     @classmethod
     def _path(cls, node: ProxyNode, signature: str) -> Path:
-        key = hashlib.sha256(f"{cls.make_node_fingerprint(node)}:{signature}".encode()).hexdigest()
+        key = hashlib.sha256(f"{make_node_fingerprint(node)}:{signature}".encode()).hexdigest()
         return ApiStore.data_dir() / "probe-cache" / f"{key}.json"
-
-    @classmethod
-    async def init_db(cls) -> None:
-        (ApiStore.data_dir() / "probe-cache").mkdir(parents=True, exist_ok=True)
 
     @classmethod
     async def get(cls, node: ProxyNode, api_sites=None, *, probe_config=None) -> ProbeData | None:
@@ -70,7 +58,7 @@ class ProbeCache:
         signature = cls.config_signature(probe_config=snapshot)
         if expected_signature is not None and expected_signature != signature:
             return
-        value = {"fingerprint": cls.make_node_fingerprint(node), "node_identity": cls.make_node_identity(node), "config_signature": signature, "created_at": int(time.time()), "expires_at": int(time.time()) + int(settings.PROBE_CACHE_TTL_SECONDS), "probe": asdict(probe_data)}
+        value = {"fingerprint": make_node_fingerprint(node), "config_signature": signature, "created_at": int(time.time()), "expires_at": int(time.time()) + int(settings.PROBE_CACHE_TTL_SECONDS), "probe": asdict(probe_data)}
         async with cls._write_lock:
             if signature != cls.config_signature(probe_config=snapshot):
                 return

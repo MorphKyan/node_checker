@@ -12,11 +12,13 @@ import threading
 import time
 import uuid
 from copy import deepcopy
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from models import TestedNode
 from module_result_codec import restore_tested_nodes
+from module_runtime_settings import RuntimeSettings
 from settings import settings
 
 
@@ -94,7 +96,7 @@ class ApiStore:
     def _default_config(cls) -> dict[str, Any]:
         return {
             "version": 1,
-            "runtime_settings": {key: getattr(settings, key) for key in __import__("module_runtime_settings").EDITABLE_SETTINGS},
+            "runtime_settings": RuntimeSettings.get_editable(),
             "exit_ip_endpoint": "https://ipwho.is/",
             "api_sites": deepcopy(DEFAULT_API_SITES),
             "subscriptions": [],
@@ -173,9 +175,8 @@ class ApiStore:
         return ["ipwhois", "ipapi", "scamalytics", "proxycheck", "abstract", "ip2location"]
 
     @classmethod
-    def _validate_site(cls, data: dict[str, Any], *, existing: dict[str, Any] | None = None) -> dict[str, Any]:
-        site = deepcopy(existing or {})
-        site.update({k: v for k, v in data.items() if k not in {"clear_api_key", "api_key_configured"}})
+    def _validate_site(cls, data: dict[str, Any]) -> dict[str, Any]:
+        site = {k: deepcopy(v) for k, v in data.items() if k not in {"clear_api_key", "api_key_configured"}}
         site_id = str(site.get("id", "")).strip()
         if not site_id or not site_id.replace("_", "").replace("-", "").isalnum():
             raise ValueError("site id must contain only letters, digits, '-' or '_'")
@@ -227,7 +228,7 @@ class ApiStore:
                     candidate["api_key"] = ""
                 elif "api_key" in data and data["api_key"]:
                     candidate["api_key"] = str(data["api_key"])
-                site = cls._validate_site(candidate, existing=None)
+                site = cls._validate_site(candidate)
                 config["api_sites"][index] = site; cls._save_config(config)
                 return cls._public_site(site)
         return None
@@ -390,7 +391,7 @@ class ApiStore:
     @classmethod
     def _result_payload(cls, subscription_id: str, nodes: list[TestedNode], api_sites_snapshot: list[dict] | None = None, exit_ip_endpoint_snapshot: str | None = None) -> dict:
         now = cls.now()
-        return {"subscription_id": subscription_id, "nodes": [__import__("dataclasses").asdict(n) for n in nodes], "node_count": len(nodes), "valid_count": sum(n.analyzed_node.is_valid for n in nodes), "updated_at": now, "api_sites_snapshot": [cls._public_site(s) for s in (api_sites_snapshot or [])], "exit_ip_endpoint_snapshot": exit_ip_endpoint_snapshot}
+        return {"subscription_id": subscription_id, "nodes": [asdict(n) for n in nodes], "node_count": len(nodes), "valid_count": sum(n.analyzed_node.is_valid for n in nodes), "updated_at": now, "api_sites_snapshot": [cls._public_site(s) for s in (api_sites_snapshot or [])], "exit_ip_endpoint_snapshot": exit_ip_endpoint_snapshot}
 
     @classmethod
     def save_results(cls, subscription_id: str, nodes: list[TestedNode], api_sites_snapshot: list[dict] | None = None) -> None:

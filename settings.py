@@ -32,7 +32,6 @@ class Config:
     TTFB_TARGET_URL = "http://www.gstatic.com/generate_204"
     SPEEDTEST_URL = "https://dl.google.com/android/repository/platform-tools_r35.0.0-windows.zip" # ~6MB
 
-    # 评分规则阈值
     # 本地探测结果缓存
     CACHE_ENABLED = True
     PROBE_CACHE_TTL_SECONDS = 24 * 60 * 60

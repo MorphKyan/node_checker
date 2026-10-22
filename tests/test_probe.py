@@ -14,7 +14,6 @@ class LightweightProbeTests(unittest.TestCase):
             with (
                 patch.object(LightweightProbe, "tcp_ping", new=AsyncMock(return_value=80.0)),
                 patch.object(LightweightProbe, "test_ttfb", new=AsyncMock(return_value=210.0)),
-                patch.object(LightweightProbe, "trace_route", new=AsyncMock(return_value=("", False, False, ""))),
                 patch.object(LightweightProbe, "detect_ipv6", new=AsyncMock(return_value=(False, ""))),
                 patch.object(LightweightProbe, "_fetch_exit_ip", new=AsyncMock(return_value=("8.8.8.8", {"country_code": "US"}))),
                 patch("module_api_store.ApiStore.get_api_sites", side_effect=AssertionError("must not read current sites")),
@@ -22,6 +21,9 @@ class LightweightProbeTests(unittest.TestCase):
                 probe = await LightweightProbe.run_probe(node, "socks5://127.0.0.1:1080", api_sites=[])
             self.assertEqual(probe.actual_ip, "8.8.8.8")
             self.assertIsNone(probe.profile.risk_score)
+            self.assertEqual(probe.trace_path, "")
+            self.assertIsNone(probe.is_detour)
+            self.assertIsNone(probe.is_backbone)
         asyncio.run(run_case())
 
     def test_registry_status_and_risk_are_aggregated(self):
@@ -32,7 +34,6 @@ class LightweightProbeTests(unittest.TestCase):
             with (
                 patch.object(LightweightProbe, "tcp_ping", new=AsyncMock(return_value=9999.0)),
                 patch.object(LightweightProbe, "test_ttfb", new=AsyncMock(return_value=110.0)),
-                patch.object(LightweightProbe, "trace_route", new=AsyncMock(return_value=("", False, False, ""))),
                 patch.object(LightweightProbe, "detect_ipv6", new=AsyncMock(return_value=(False, ""))),
                 patch.object(LightweightProbe, "_fetch_exit_ip", new=AsyncMock(return_value=("1.1.1.1", {"country_code": "US"}))),
                 patch.object(LightweightProbe, "_fetch_site", new=AsyncMock(return_value=({"success": True, "security": {"proxy": True}}, "success"))),
@@ -52,7 +53,6 @@ class LightweightProbeTests(unittest.TestCase):
             with (
                 patch.object(LightweightProbe, "tcp_ping", new=AsyncMock(return_value=80.0)),
                 patch.object(LightweightProbe, "test_ttfb", new=AsyncMock(return_value=210.0)),
-                patch.object(LightweightProbe, "trace_route", new=AsyncMock(return_value=("", False, False, ""))),
                 patch.object(LightweightProbe, "detect_ipv6", new=AsyncMock(return_value=(False, ""))),
                 patch.object(LightweightProbe, "_fetch_exit_ip", new=fetch_exit),
                 patch("module_api_store.ApiStore.get_exit_ip_endpoint", side_effect=AssertionError("must use snapshot")),

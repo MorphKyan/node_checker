@@ -45,26 +45,12 @@ def build_plain_subscription(
 def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
     from module_profile import DISPLAY_LABELS
     sorted_nodes = SubscriptionExporter.sort_nodes(nodes, valid_only=False)
-    compact_names = SubscriptionExporter.deduplicate_names(
-        [
-            SubscriptionExporter.build_remark(
-                node,
-                "compact",
-                settings.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH,
-            )
-            for node in sorted_nodes
-        ],
+    compact_names = SubscriptionExporter.build_names(
+        sorted_nodes, "compact",
         settings.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH,
     )
-    detailed_names = SubscriptionExporter.deduplicate_names(
-        [
-            SubscriptionExporter.build_remark(
-                node,
-                "detailed",
-                settings.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH,
-            )
-            for node in sorted_nodes
-        ],
+    detailed_names = SubscriptionExporter.build_names(
+        sorted_nodes, "detailed",
         settings.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH,
     )
 

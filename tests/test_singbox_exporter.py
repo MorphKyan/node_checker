@@ -1,6 +1,8 @@
 import unittest
 from models import LabelEvidence, TestedNode, VlessNode, AnalyzedNode, NodeProfile, ProbeData
+from module_api_presenter import build_detail_nodes, build_plain_subscription
 from module_singbox_exporter import generate_singbox_config, strip_comments, validate_singbox_template_content
+from settings import settings
 
 def make_mock_tested_node(
     raw_uri: str,
@@ -52,6 +54,25 @@ def make_mock_tested_node(
     )
 
 class SingboxExporterTests(unittest.TestCase):
+    def test_detail_names_match_subscription_and_singbox_exports(self):
+        nodes = [
+            make_mock_tested_node(f"vless://{index}@ex.com:443?type=tcp#old", "重复节点" * 20,
+                                  risk, 100, 15, valid=valid)
+            for index, risk, valid in [(1, 40, False), (2, 10, True), (3, 10, True)]
+        ]
+        details = build_detail_nodes(nodes)
+        for mode, max_length in [("compact", settings.SUBSCRIPTION_COMPACT_MAX_NAME_LENGTH),
+                                 ("detailed", settings.SUBSCRIPTION_DETAILED_MAX_NAME_LENGTH)]:
+            with self.subTest(mode=mode):
+                names = [detail[f"enhanced_name_{mode}"] for detail in details]
+                self.assertEqual(len(set(names)), len(nodes))
+                plain = build_plain_subscription(nodes, mode=mode, valid_only=False)
+                self.assertEqual(plain.splitlines(), [detail[f"{mode}_uri"] for detail in details])
+                config = generate_singbox_config('{"outbounds": []}', nodes, mode, max_length)
+                self.assertEqual([outbound["tag"] for outbound in config["outbounds"]], names)
+                self.assertEqual([uri.split("#")[0] for uri in plain.splitlines()],
+                                 [detail["raw_uri"].split("#")[0] for detail in details])
+
     def test_strip_comments(self):
         json_with_comments = """
         {

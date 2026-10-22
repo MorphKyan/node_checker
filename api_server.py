@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from module_api_presenter import build_detail_nodes, build_plain_subscription, normalize_job
 from module_api_store import ApiStore
-from module_cache import ProbeCache
 from module_runtime_settings import RuntimeSettings
 from module_subscription_exporter import SubscriptionExporter
 from module_subscription_service import SubscriptionRefreshService
@@ -21,7 +20,6 @@ async def lifespan(app: FastAPI):
     RuntimeSettings.load()
     ApiStore.init_db()
     ApiStore.fail_stale_active_jobs("API server restarted before refresh completed")
-    await ProbeCache.init_db()
     yield
 
 

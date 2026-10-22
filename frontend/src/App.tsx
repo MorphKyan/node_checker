@@ -8,7 +8,6 @@ import {
   Download,
   ExternalLink,
   FileDown,
-  Gauge,
   LayoutDashboard,
   ListChecks,
   Network,
@@ -999,13 +998,11 @@ interface ConflictInfo {
   description: string;
 }
 
-function detectConflicts(evidence: ApiVerdict[], actualGeo: string): ConflictInfo[] {
+function detectConflicts(evidence: ApiVerdict[]): ConflictInfo[] {
   const conflicts: ConflictInfo[] = [];
   if (!evidence || evidence.length === 0) return conflicts;
 
   // 1. Network type conflict
-  let hasResidential = false;
-  let hasDatacenter = false;
   const resSources: string[] = [];
   const dcSources: string[] = [];
 
@@ -1017,15 +1014,13 @@ function detectConflicts(evidence: ApiVerdict[], actualGeo: string): ConflictInf
         lbl.label === "mobile" ||
         lbl.label === "business"
       ) {
-        hasResidential = true;
         resSources.push(`${verdict.source} (${lbl.display || lbl.label})`);
       } else if (lbl.label === "datacenter" || lbl.label === "hosting") {
-        hasDatacenter = true;
         dcSources.push(`${verdict.source} (${lbl.display || lbl.label})`);
       }
     }
   }
-  if (hasResidential && hasDatacenter) {
+  if (resSources.length && dcSources.length) {
     conflicts.push({
       type: "network",
       description: `属性冲突：部分数据源判定为家宽/商宽/移动网络 [${resSources.join(
@@ -1035,14 +1030,11 @@ function detectConflicts(evidence: ApiVerdict[], actualGeo: string): ConflictInf
   }
 
   // 2. Risk evaluation conflict
-  let hasHighRisk = false;
-  let hasClean = false;
   const riskSources: string[] = [];
   const cleanSources: string[] = [];
 
   for (const verdict of evidence) {
     if (verdict.risk_score !== null && verdict.risk_score > 50) {
-      hasHighRisk = true;
       riskSources.push(`${verdict.source} (风险评分: ${verdict.risk_score}%)`);
     }
     for (const lbl of verdict.risk_labels) {
@@ -1052,17 +1044,15 @@ function detectConflicts(evidence: ApiVerdict[], actualGeo: string): ConflictInf
         lbl.label === "tor" ||
         lbl.label === "abuser"
       ) {
-        hasHighRisk = true;
         if (!riskSources.some((s) => s.startsWith(verdict.source))) {
           riskSources.push(`${verdict.source} (${lbl.display || lbl.label})`);
         }
       } else if (lbl.label === "clean" && lbl.confidence > 0.6) {
-        hasClean = true;
         cleanSources.push(`${verdict.source} (置信度: ${Math.round(lbl.confidence * 100)}%)`);
       }
     }
   }
-  if (hasHighRisk && hasClean) {
+  if (riskSources.length && cleanSources.length) {
     conflicts.push({
       type: "risk",
       description: `信誉风险冲突：部分数据源报告高风险评分/标签 [${riskSources.join(
@@ -1075,7 +1065,7 @@ function detectConflicts(evidence: ApiVerdict[], actualGeo: string): ConflictInf
 }
 
 function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }) {
-  const conflicts = useMemo(() => detectConflicts(node.probe.evidence, node.probe.actual_geo), [node]);
+  const conflicts = useMemo(() => detectConflicts(node.probe.evidence), [node]);
 
   return (
     <div className="fixed inset-0 z-30 bg-slate-950/20">

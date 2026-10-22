@@ -1,7 +1,7 @@
 import json
 import re
-from models import TestedNode, Hy2Node, SsNode
-from module_shadowsocks import singbox_shadowsocks_outbound
+from models import TestedNode
+from module_singbox_outbound import singbox_outbound
 from module_subscription_exporter import SubscriptionExporter
 
 def strip_comments(json_str: str) -> str:
@@ -63,85 +63,7 @@ def generate_singbox_config(
     node_tags = []
     for node, tag in zip(sorted_nodes, remarks):
         p_node = node.analyzed_node.node
-        if isinstance(p_node, SsNode):
-            outbound = singbox_shadowsocks_outbound(p_node, tag)
-        elif isinstance(p_node, Hy2Node) or getattr(p_node, "protocol", "vless") in {"hy2", "hysteria2"}:
-            outbound = {
-                "type": "hysteria2",
-                "tag": tag,
-                "server": p_node.server_ip,
-                "server_port": p_node.server_port,
-                "password": getattr(p_node, "password", ""),
-                "tls": {
-                    "enabled": True,
-                    "insecure": getattr(p_node, "insecure", False),
-                }
-            }
-            if getattr(p_node, "sni", ""):
-                outbound["tls"]["server_name"] = p_node.sni
-            if getattr(p_node, "obfs", ""):
-                outbound["obfs"] = {
-                    "type": p_node.obfs,
-                    "password": getattr(p_node, "obfs_password", "")
-                }
-            if getattr(p_node, "up_mbps", None) is not None:
-                outbound["up_mbps"] = p_node.up_mbps
-            if getattr(p_node, "down_mbps", None) is not None:
-                outbound["down_mbps"] = p_node.down_mbps
-        else:
-            vless = p_node
-            outbound = {
-                "type": "vless",
-                "tag": tag,
-                "server": vless.server_ip,
-                "server_port": vless.server_port,
-                "uuid": getattr(vless, "uuid", ""),
-            }
-            
-            if getattr(vless, "flow", ""):
-                outbound["flow"] = vless.flow
-
-            security = getattr(vless, "security", "")
-            if security in ["tls", "reality"]:
-                tls_config = {
-                    "enabled": True,
-                    "insecure": False,
-                    "alpn": (
-                        [item for item in vless.alpn.split(",") if item]
-                        if getattr(vless, "alpn", "")
-                        else ["h2", "http/1.1"]
-                    ),
-                }
-                if getattr(vless, "sni", ""):
-                    tls_config["server_name"] = vless.sni
-                if getattr(vless, "fp", ""):
-                    tls_config["utls"] = {
-                        "enabled": True,
-                        "fingerprint": vless.fp,
-                    }
-                if security == "reality":
-                    reality_config = {"enabled": True}
-                    if getattr(vless, "pbk", ""):
-                        reality_config["public_key"] = vless.pbk
-                    if getattr(vless, "sid", ""):
-                        reality_config["short_id"] = vless.sid
-                    tls_config["reality"] = reality_config
-                outbound["tls"] = tls_config
-
-            vless_type = getattr(vless, "type", "tcp")
-            if vless_type == "ws":
-                transport = {"type": "ws"}
-                if getattr(vless, "path", ""):
-                    transport["path"] = vless.path
-                if getattr(vless, "host", ""):
-                    transport["headers"] = {"Host": vless.host}
-                outbound["transport"] = transport
-            elif vless_type == "grpc":
-                transport = {"type": "grpc"}
-                if getattr(vless, "path", ""):
-                    transport["service_name"] = vless.path
-                outbound["transport"] = transport
-            
+        outbound = singbox_outbound(p_node, tag)
         node_outbounds.append(outbound)
         node_tags.append(tag)
 
@@ -150,6 +72,7 @@ def generate_singbox_config(
     if not isinstance(outbounds, list):
         outbounds = []
 
+    needs_direct = False
     for outbound in outbounds:
         if not isinstance(outbound, dict):
             continue
@@ -182,6 +105,7 @@ def generate_singbox_config(
 
             if not matched_tags:
                 matched_tags.append("DIRECT")
+                needs_direct = True
 
             outbound["outbounds"] = matched_tags
 
@@ -191,6 +115,8 @@ def generate_singbox_config(
             outbound.pop("use_all_nodes", None)
 
     # 5. Append raw node outbounds to the end
+    if needs_direct and not any(isinstance(item, dict) and item.get("tag") == "DIRECT" for item in outbounds):
+        outbounds.append({"type": "direct", "tag": "DIRECT"})
     outbounds.extend(node_outbounds)
     config["outbounds"] = outbounds
 

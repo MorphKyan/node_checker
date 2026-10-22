@@ -1,6 +1,5 @@
 import os
 import zipfile
-import paramiko
 import subprocess
 
 def build_frontend():
@@ -16,7 +15,7 @@ def build_frontend():
 def create_archive(zip_filename="node_checker.zip"):
     exclude_dirs = {
         ".git", ".github", "venv", ".pytest_cache", "__pycache__", 
-        "node_modules", "cache", "result", "data"
+        "node_modules", "cache", "result", "data", "inputs", "dist-cache"
     }
     exclude_files = {
         "xray-latest.zip", "sing-box-latest.zip", "xray.exe", 
@@ -28,7 +27,7 @@ def create_archive(zip_filename="node_checker.zip"):
             # Prune directories starting with dot or in excluded list
             dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
             for file in files:
-                if file in exclude_files or file.endswith('.pyc') or file.endswith('.log'):
+                if file.startswith(".env") or file in exclude_files or file.endswith('.pyc') or file.endswith('.log'):
                     continue
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, '.')
@@ -36,67 +35,46 @@ def create_archive(zip_filename="node_checker.zip"):
     print(f"Created archive: {zip_filename}")
 
 def deploy():
-    host = "REDACTED"
-    port = 22
-    username = "root"
-    password = "REDACTED"
+    import paramiko
+
+    host = os.environ["DEPLOY_HOST"]
+    username = os.environ["DEPLOY_USER"]
+    port = int(os.environ.get("DEPLOY_PORT", "22"))
     zip_filename = "node_checker.zip"
     remote_zip_path = f"/tmp/{zip_filename}"
     remote_deploy_dir = "/root/node-checker"
 
-    try:
-        build_frontend()
-    except Exception as e:
-        print(f"Aborting deployment: {e}")
-        return
-
+    build_frontend()
     create_archive(zip_filename)
-
-    print(f"Connecting to {host}...")
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.load_system_host_keys()
     try:
-        ssh.connect(host, port, username, password)
-    except Exception as e:
-        print(f"SSH Connection failed: {e}")
-        return
+        ssh.connect(hostname=host, port=port, username=username,
+                    password=os.environ.get("DEPLOY_PASSWORD"))
+        with ssh.open_sftp() as sftp:
+            sftp.put(zip_filename, remote_zip_path)
 
-    print("Uploading archive...")
-    sftp = ssh.open_sftp()
-    sftp.put(zip_filename, remote_zip_path)
-    sftp.close()
-
-    print("Executing remote commands...")
-    commands = [
-        f"mkdir -p {remote_deploy_dir}",
-        f"mkdir -p /mnt/cache/appdata/node-checker",
-        f"apt-get update && apt-get install -y unzip || yum install -y unzip || true",
-        f"unzip -o {remote_zip_path} -d {remote_deploy_dir}",
-        f"rm -f {remote_zip_path}",
-        f"docker rm -f node-checker || true",
-        f"cd {remote_deploy_dir} && (docker compose down || docker-compose down || true)",
-        f"cd {remote_deploy_dir} && docker build -t node-checker-node-checker:latest .",
-        f"cd {remote_deploy_dir} && (docker compose up -d || docker-compose up -d)"
-    ]
-
-    for cmd in commands:
-        print(f"Running: {cmd}")
-        stdin, stdout, stderr = ssh.exec_command(cmd)
-        exit_status = stdout.channel.recv_exit_status()
-        out_text = stdout.read().decode('utf-8')
-        err_text = stderr.read().decode('utf-8')
-        if out_text:
-            print(f"STDOUT:\n{out_text}")
-        if err_text:
-            print(f"STDERR:\n{err_text}")
-        print(f"Exit code: {exit_status}\n")
-
-    ssh.close()
-    
-    # Remove local zip
-    if os.path.exists(zip_filename):
-        os.remove(zip_filename)
+        commands = [
+            f"mkdir -p {remote_deploy_dir} /mnt/cache/appdata/node-checker",
+            f"unzip -o {remote_zip_path} -d {remote_deploy_dir}",
+            f"rm -f {remote_zip_path}",
+            f"cd {remote_deploy_dir} && docker compose build",
+            f"cd {remote_deploy_dir} && docker compose up -d --no-build --wait --wait-timeout 90",
+        ]
+        for cmd in commands:
+            print(f"Running: {cmd}")
+            _, stdout, stderr = ssh.exec_command(cmd)
+            output = stdout.read().decode("utf-8")
+            error = stderr.read().decode("utf-8")
+            if stdout.channel.recv_exit_status() != 0:
+                raise RuntimeError(f"Deployment command failed: {cmd}\n{output}\n{error}")
+            print(output)
+    finally:
+        ssh.close()
+        if os.path.exists(zip_filename):
+            os.remove(zip_filename)
     print("Deployment completed successfully!")
+
 
 if __name__ == "__main__":
     deploy()

@@ -4,82 +4,14 @@ import subprocess
 import tempfile
 import asyncio
 from models import ProxyNode, Hy2Node, SsNode
-from module_shadowsocks import singbox_shadowsocks_outbound, xray_shadowsocks_outbound
+from module_shadowsocks import xray_shadowsocks_outbound
+from module_singbox_outbound import singbox_outbound
 from settings import settings
 
 class TunnelController:
     @staticmethod
     def generate_singbox_config(node: ProxyNode, local_port: int) -> str:
-        if isinstance(node, SsNode):
-            outbound = singbox_shadowsocks_outbound(node, "ss-out")
-        elif isinstance(node, Hy2Node) or getattr(node, "protocol", "vless") in {"hy2", "hysteria2"}:
-            outbound = {
-                "type": "hysteria2",
-                "tag": "hy2-out",
-                "server": node.server_ip,
-                "server_port": node.server_port,
-                "password": getattr(node, "password", ""),
-                "tls": {
-                    "enabled": True,
-                    "insecure": getattr(node, "insecure", False),
-                }
-            }
-            if getattr(node, "sni", ""):
-                outbound["tls"]["server_name"] = node.sni
-            if getattr(node, "obfs", ""):
-                outbound["obfs"] = {
-                    "type": node.obfs,
-                    "password": getattr(node, "obfs_password", "")
-                }
-            if getattr(node, "up_mbps", None) is not None:
-                outbound["up_mbps"] = node.up_mbps
-            if getattr(node, "down_mbps", None) is not None:
-                outbound["down_mbps"] = node.down_mbps
-
-        else:
-            outbound = {
-                "type": "vless",
-                "tag": "vless-out",
-                "server": node.server_ip,
-                "server_port": node.server_port,
-                "uuid": getattr(node, "uuid", ""),
-            }
-            if getattr(node, "flow", ""):
-                outbound["flow"] = node.flow
-            
-            # TLS / Reality
-            security = getattr(node, "security", "")
-            if security in ["tls", "reality"]:
-                tls_config = {
-                    "enabled": True,
-                    "server_name": getattr(node, "sni", ""),
-                    "insecure": False,
-                    "utls": {
-                        "enabled": bool(getattr(node, "fp", "")),
-                        "fingerprint": getattr(node, "fp", "") or "chrome"
-                    }
-                }
-                if security == "reality":
-                    tls_config["reality"] = {
-                        "enabled": True,
-                        "public_key": getattr(node, "pbk", ""),
-                        "short_id": getattr(node, "sid", "")
-                    }
-                outbound["tls"] = tls_config
-
-            # Transport type
-            node_type = getattr(node, "type", "tcp")
-            if node_type == "ws":
-                outbound["transport"] = {
-                    "type": "ws",
-                    "path": getattr(node, "path", ""),
-                    "headers": {"Host": getattr(node, "host", "")} if getattr(node, "host", "") else {}
-                }
-            elif node_type == "grpc":
-                outbound["transport"] = {
-                    "type": "grpc",
-                    "service_name": getattr(node, "path", "") or ""
-                }
+        outbound = singbox_outbound(node, "proxy-out")
 
         config = {
             "log": {"level": "fatal"},
@@ -223,6 +155,7 @@ class TunnelController:
                 sing_box_exe = "sing-box" # fallback to path
             cmd = [sing_box_exe, "run", "-c", config_path]
             
+        process = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -231,10 +164,9 @@ class TunnelController:
             )
             await asyncio.sleep(settings.TUNNEL_START_DELAY)
             return process, config_path
-        except Exception as e:
-            if os.path.exists(config_path):
-                os.remove(config_path)
-            raise e
+        except (Exception, asyncio.CancelledError):
+            await TunnelController.stop_tunnel(process, config_path)
+            raise
 
     @staticmethod
     async def stop_tunnel(process, config_path: str):
@@ -245,6 +177,7 @@ class TunnelController:
             except Exception:
                 try:
                     process.kill()
+                    await process.wait()
                 except Exception:
                     pass
         if config_path and os.path.exists(config_path):

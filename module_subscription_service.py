@@ -1,6 +1,7 @@
 import asyncio
 import os
 import socket
+from contextlib import asynccontextmanager
 
 from models import AnalyzedNode, ProbeData, TestedNode, ProxyNode
 from module_analyzer import NodeAnalyzer
@@ -21,6 +22,29 @@ def get_free_local_port() -> int:
 
 class SubscriptionRefreshService:
     _running_tasks: dict[str, asyncio.Task] = {}
+
+    _limit_loop = None
+    _limits = {}
+
+    @classmethod
+    @asynccontextmanager
+    async def limit(cls, setting: str):
+        loop = asyncio.get_running_loop()
+        if cls._limit_loop is not loop:
+            cls._limit_loop, cls._limits = loop, {}
+        if setting not in cls._limits:
+            cls._limits[setting] = {"condition": asyncio.Condition(), "active": 0}
+        state = cls._limits[setting]
+        condition = state["condition"]
+        async with condition:
+            await condition.wait_for(lambda: state["active"] < max(1, int(getattr(settings, setting))))
+            state["active"] += 1
+        try:
+            yield
+        finally:
+            async with condition:
+                state["active"] -= 1
+                condition.notify_all()
 
     @staticmethod
     def freeze_probe_config(probe_config: dict | None = None, api_sites: list[dict] | None = None) -> dict:
@@ -73,7 +97,7 @@ class SubscriptionRefreshService:
     @staticmethod
     async def process_node_filter(
         node: ProxyNode,
-        sem: asyncio.Semaphore,
+        sem,
         *,
         force_probe: bool = False,
         api_sites: list[dict] | None = None,
@@ -136,12 +160,11 @@ class SubscriptionRefreshService:
     ) -> list[TestedNode]:
         # Freeze once for every caller (including CLI) before cache/probe work.
         probe_config = cls.freeze_probe_config(probe_config, api_sites)
-        filter_sem = asyncio.Semaphore(settings.FILTER_CONCURRENCY)
         processed = 0
 
         async def filter_with_progress(node: ProxyNode) -> AnalyzedNode:
             nonlocal processed
-            result = await cls.process_node_filter(node, filter_sem, force_probe=force_probe, probe_config=probe_config)
+            result = await cls.process_node_filter(node, cls.limit("FILTER_CONCURRENCY"), force_probe=force_probe, probe_config=probe_config)
             processed += 1
             if progress_callback:
                 progress_callback("filter", processed, len(nodes))
@@ -161,11 +184,10 @@ class SubscriptionRefreshService:
             progress_callback("speedtest", 0, len(nodes_to_test))
 
         speed_processed = 0
-        speed_sem = asyncio.Semaphore(max(1, int(settings.SPEEDTEST_CONCURRENCY)))
 
         async def speed_with_progress(node: AnalyzedNode) -> TestedNode:
             nonlocal speed_processed
-            async with speed_sem:
+            async with cls.limit("SPEEDTEST_CONCURRENCY"):
                 result = await cls.run_speed_test(node)
             speed_processed += 1
             if progress_callback:

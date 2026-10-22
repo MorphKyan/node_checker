@@ -26,10 +26,10 @@ export function filterNodes(nodes: NodeResult[], filters: NodeFilters): NodeResu
     if (filters.maxRisk && (node.probe.risk_score === null || node.probe.risk_score > Number(filters.maxRisk))) return false;
     if (filters.maxTtfb && node.probe.ttfb_ms > Number(filters.maxTtfb)) return false;
     if (filters.minSpeed && (node.download_speed_mbps === null || node.download_speed_mbps < Number(filters.minSpeed))) return false;
-    if (filters.detourFilter === "yes" && !node.probe.is_detour) return false;
-    if (filters.detourFilter === "no" && node.probe.is_detour) return false;
-    if (filters.backboneFilter === "yes" && !node.probe.is_backbone) return false;
-    if (filters.backboneFilter === "no" && node.probe.is_backbone) return false;
+    if (filters.detourFilter === "yes" && node.probe.is_detour !== true) return false;
+    if (filters.detourFilter === "no" && node.probe.is_detour !== false) return false;
+    if (filters.backboneFilter === "yes" && node.probe.is_backbone !== true) return false;
+    if (filters.backboneFilter === "no" && node.probe.is_backbone !== false) return false;
     return true;
   });
 }

@@ -1,16 +1,8 @@
 import os
 import re
-import unicodedata
 from models import TestedNode, Hy2Node, SsNode
-
-def get_visual_width(s: str) -> int:
-    width = 0
-    for char in str(s):
-        if unicodedata.east_asian_width(char) in ('W', 'F'):
-            width += 2
-        else:
-            width += 1
-    return width
+from module_node_identity import make_node_fingerprint
+from module_subscription_exporter import SubscriptionExporter, get_visual_width
 
 def pad_string(s: str, width: int) -> str:
     vw = get_visual_width(s)
@@ -50,15 +42,8 @@ class ResultExporter:
         
         report_path = os.path.join(base_dir, "report.md")
 
-        sorted_nodes = sorted(
-            nodes,
-            key=lambda n: (
-                n.analyzed_node.is_valid,
-                -(n.analyzed_node.probe.profile.risk_score or 101)
-            ),
-            reverse=True
-        )
-        
+        sorted_nodes = SubscriptionExporter.sort_nodes(nodes, valid_only=False)
+
         headers = ["Status", "Remark", "Profile", "Actual IP", "Geo", "Ping(ms)", "TTFB(ms)", "Speed(Mbps)", "Detour", "Backbone", "Risk", "Reject Reason"]
         rows = []
         
@@ -78,8 +63,8 @@ class ResultExporter:
             
             rows.append([
                 status, remark, profile, actual_ip, geo, ping, ttfb, speed,
-                "Yes" if probe.is_detour else "No",
-                "Yes" if probe.is_backbone else "No",
+                "Unknown" if probe.is_detour is None else "Yes" if probe.is_detour else "No",
+                "Unknown" if probe.is_backbone is None else "Yes" if probe.is_backbone else "No",
                 risk_display, str(an.reject_reason)
             ])
             
@@ -105,10 +90,7 @@ class ResultExporter:
             
             # Write detailed report for each node
             safe_remark = ResultExporter.sanitize_filename(an.node.remark or "Unnamed")
-            # Use last part of IP/Domain as suffix to avoid collision
-            addr_parts = an.node.server_ip.split('.')
-            ip_suffix = addr_parts[-1] if addr_parts else "node"
-            safe_remark = f"{safe_remark}_{ip_suffix}"
+            safe_remark = f"{safe_remark[:80]}_{make_node_fingerprint(an.node)[:16]}"
             detail_path = os.path.join(details_dir, f"{safe_remark}.md")
             
             node_protocol = getattr(an.node, "protocol", "vless").upper()
@@ -161,8 +143,8 @@ class ResultExporter:
 
 ## 4. Route Trace
 - **Trace Path**: `{probe.trace_path}`
-- **Is Detour**: `{"Yes" if probe.is_detour else "No"}`
-- **Is Backbone**: `{"Yes" if probe.is_backbone else "No"}`
+- **Is Detour**: `{"Unknown" if probe.is_detour is None else "Yes" if probe.is_detour else "No"}`
+- **Is Backbone**: `{"Unknown" if probe.is_backbone is None else "Yes" if probe.is_backbone else "No"}`
 - **Backbone Info**: `{probe.backbone_info}`
 
 ## 5. Performance

@@ -16,7 +16,6 @@ from module_subscription_service import SubscriptionRefreshService
 from module_singbox_exporter import generate_singbox_config, validate_singbox_template_content
 
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     RuntimeSettings.load()
@@ -194,19 +193,7 @@ def enhanced_node_matches_filters(
     return True
 
 
-def build_enhanced_subscription_response(
-    subscription_ids: list[str],
-    *,
-    limit: Optional[int],
-    max_risk: Optional[float],
-    mode: Literal["compact", "detailed"],
-    format: Literal["base64", "plain"],
-    valid_only: bool,
-    geo: Optional[list[str]],
-    network: Optional[list[str]],
-    exclude_type: Optional[list[str]],
-    max_ttfb: Optional[float],
-) -> PlainTextResponse:
+def aggregate_subscription_nodes(subscription_ids: list[str]) -> list:
     from module_node_identity import make_node_fingerprint
 
     for sub_id in subscription_ids:
@@ -230,11 +217,29 @@ def build_enhanced_subscription_response(
             detail="No completed result is available for any of the subscriptions",
         )
 
+    return list(aggregated_nodes_map.values())
+
+
+def build_enhanced_subscription_response(
+    subscription_ids: list[str],
+    *,
+    limit: Optional[int],
+    max_risk: Optional[float],
+    mode: Literal["compact", "detailed"],
+    format: Literal["base64", "plain"],
+    valid_only: bool,
+    geo: Optional[list[str]],
+    network: Optional[list[str]],
+    exclude_type: Optional[list[str]],
+    max_ttfb: Optional[float],
+) -> PlainTextResponse:
+    aggregated_nodes = aggregate_subscription_nodes(subscription_ids)
+
     filtered_nodes = []
     geo_values = normalize_filter_values(geo)
     network_values = normalize_filter_values(network)
     exclude_type_values = normalize_filter_values(exclude_type)
-    for node in aggregated_nodes_map.values():
+    for node in aggregated_nodes:
         if valid_only and not node.analyzed_node.is_valid:
             continue
         risk = node.analyzed_node.probe.profile.risk_score
@@ -338,6 +343,53 @@ async def get_single_enhanced_subscription(
     )
 
 
+@app.get("/subscriptions/singbox")
+async def get_singbox_subscription(
+    subscription_ids: list[str] = Query(..., alias="subscription_id"),
+    template_id: Optional[str] = Query(default=None),
+    limit: Optional[int] = Query(default=None, ge=1),
+    max_risk: Optional[float] = Query(default=None, ge=0.0, le=100.0),
+    mode: Literal["compact", "detailed"] = "compact",
+    valid_only: bool = Query(default=True),
+):
+    if template_id:
+        template = ApiStore.get_singbox_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+    else:
+        templates = ApiStore.list_singbox_templates()
+        if not templates:
+            raise HTTPException(status_code=400, detail="No templates available")
+        template = templates[0]
+
+    aggregated_nodes = aggregate_subscription_nodes(subscription_ids)
+
+    filtered_nodes = []
+    for node in aggregated_nodes:
+        if valid_only and not node.analyzed_node.is_valid:
+            continue
+        risk = node.analyzed_node.probe.profile.risk_score
+        if max_risk is not None and (risk is None or risk > max_risk):
+            continue
+        filtered_nodes.append(node)
+
+    sorted_nodes = SubscriptionExporter.sort_nodes(filtered_nodes, valid_only=False)
+    if limit is not None:
+        sorted_nodes = sorted_nodes[:limit]
+
+    try:
+        config = generate_singbox_config(
+            template["content"],
+            sorted_nodes,
+            mode=mode,
+            max_name_length=96 if mode == "detailed" else 64
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Configuration generation error: {e}")
+
+    return config
+
+
 @app.get("/subscriptions/{subscription_id}")
 async def get_subscription(subscription_id: str) -> dict:
     subscription = ensure_subscription(subscription_id)
@@ -371,7 +423,6 @@ async def delete_subscription(subscription_id: str) -> dict:
     if not ApiStore.delete_subscription(subscription_id):
         raise HTTPException(status_code=404, detail="Subscription not found")
     return {"deleted": True, "subscription_id": subscription_id}
-
 
 
 @app.get("/subscriptions/{subscription_id}/results")
@@ -531,83 +582,6 @@ async def delete_singbox_template(template_id: str) -> dict:
     if not ApiStore.delete_singbox_template(template_id):
         raise HTTPException(status_code=404, detail="Template not found")
     return {"deleted": True, "template_id": template_id}
-
-
-@app.get("/subscriptions/singbox")
-async def get_singbox_subscription(
-    subscription_ids: list[str] = Query(..., alias="subscription_id"),
-    template_id: Optional[str] = Query(default=None),
-    limit: Optional[int] = Query(default=None, ge=1),
-    max_risk: Optional[float] = Query(default=None, ge=0.0, le=100.0),
-    mode: Literal["compact", "detailed"] = "compact",
-    valid_only: bool = Query(default=True),
-):
-    from module_node_identity import make_node_fingerprint
-
-    # 1. Fetch template content
-    if template_id:
-        template = ApiStore.get_singbox_template(template_id)
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found")
-    else:
-        templates = ApiStore.list_singbox_templates()
-        if not templates:
-            raise HTTPException(status_code=400, detail="No templates available")
-        template = templates[0]
-
-    # 2. Verify all requested subscriptions exist
-    for sub_id in subscription_ids:
-        ensure_subscription(sub_id)
-
-    # 3. Retrieve latest results and aggregate nodes
-    aggregated_nodes_map = {}
-    has_results = False
-    for sub_id in subscription_ids:
-        result = ApiStore.get_latest_result(sub_id)
-        if result:
-            has_results = True
-            for node in result["nodes"]:
-                # Deduplication using make_node_fingerprint
-                fp = make_node_fingerprint(node.analyzed_node.node)
-                existing = aggregated_nodes_map.get(fp)
-                if not existing or SubscriptionExporter.sort_nodes([node, existing], valid_only=False)[0] is node:
-                    aggregated_nodes_map[fp] = node
-
-    if not has_results:
-        raise HTTPException(
-            status_code=409,
-            detail="No completed result is available for any of the subscriptions",
-        )
-
-    aggregated_nodes = list(aggregated_nodes_map.values())
-
-    # 4. Filter nodes by validity and explicit maximum risk
-    filtered_nodes = []
-    for node in aggregated_nodes:
-        if valid_only and not node.analyzed_node.is_valid:
-            continue
-        risk = node.analyzed_node.probe.profile.risk_score
-        if max_risk is not None and (risk is None or risk > max_risk):
-            continue
-        filtered_nodes.append(node)
-
-    # 5. Apply limit
-    sorted_nodes = SubscriptionExporter.sort_nodes(filtered_nodes, valid_only=False)
-    if limit is not None:
-        sorted_nodes = sorted_nodes[:limit]
-
-    # 6. Generate configuration
-    try:
-        config = generate_singbox_config(
-            template["content"],
-            sorted_nodes,
-            mode=mode,
-            max_name_length=96 if mode == "detailed" else 64
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Configuration generation error: {e}")
-
-    return config
 
 
 def frontend_dist_dir() -> Path:

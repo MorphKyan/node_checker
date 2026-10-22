@@ -32,6 +32,14 @@ def make_node() -> TestedNode:
 
 
 class ResultCodecTests(unittest.TestCase):
+    def test_unmeasured_legacy_routes_are_unknown(self):
+        data = asdict(make_node().analyzed_node.probe)
+        data.update(is_detour=False, is_backbone=False)
+        self.assertIsNone(restore_probe_data(data).is_detour)
+        self.assertIsNone(restore_probe_data(data).is_backbone)
+        data["trace_path"] = "measured route"
+        self.assertIs(restore_probe_data(data).is_detour, False)
+
     def test_restore_nodes_uses_defaults_and_ignores_unknown_fields(self):
         for node_type, scheme in [(VlessNode, "vless"), (Hy2Node, "hysteria2"), (SsNode, "ss")]:
             with self.subTest(protocol=scheme):

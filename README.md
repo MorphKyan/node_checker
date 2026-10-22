@@ -338,9 +338,9 @@ GET /subscriptions/{subscription_id}/results
           "risk_labels": [{"label": "clean", "confidence": 0.55}],
           "confidence": "high"
         },
-        "is_detour": false,
-        "is_backbone": true,
-        "backbone_info": "CN2",
+        "is_detour": null,
+        "is_backbone": null,
+        "backbone_info": "",
         "evidence": ["ipwho.is: hosting=true"]
       }
     }
@@ -415,6 +415,24 @@ completed
 failed
 ```
 
+## Docker 与 SSH 部署
+
+先在 `frontend/` 运行 `npm ci`、`npm run build`，再在项目根目录运行：
+
+```sh
+docker compose up -d --build --wait
+```
+
+Compose 仅映射 `127.0.0.1:8000`，数据继续保存在 `/mnt/cache/appdata/node-checker`。
+远程访问请通过 SSH 转发：`ssh -L 8000:127.0.0.1:8000 用户@服务器`，然后打开 `http://127.0.0.1:8000`。
+构建时 `.dockerignore` 排除订阅、报告、缓存、Git 历史和本地环境，保留前端构建产物。
+
+`deploy.py` 需要本地安装 `paramiko`，远端安装 Docker Compose v2（支持 `--wait`）和 `unzip`。
+运行前设置 `DEPLOY_HOST`、`DEPLOY_USER`，可选 `DEPLOY_PORT`；默认使用 SSH 密钥或代理，也可通过 `DEPLOY_PASSWORD` 传入密码。
+远端用户须有 `/root/node-checker`、数据目录和 Docker 的访问权限；服务器主机密钥须预先核实并加入本机 `known_hosts`。
+脚本先构建再替换容器，任何远程命令失败都会终止；容器通过健康检查后才报告成功。
+旧版脚本内的密码已移除，但 Git 历史仍可能包含该凭据，必须在服务器上轮换，并清理含旧凭据的分发镜像或归档。
+
 ## 本地存储
 
 API 服务使用 `DATA_DIR`（默认 `data/`）中的 JSON 保存订阅、任务和最新检测结果：
@@ -432,6 +450,7 @@ data/probe-cache/{cache_key}.json
 ```
 
 第一版只保存每个订阅的最新详细检测结果，不保存完整历史。
+配置文件损坏或不可读时会报错并保留原文件；只有文件不存在时才生成默认配置。
 
 ## 后续路线
 
@@ -463,6 +482,8 @@ python -m unittest discover -s tests
 ## 运行注意事项
 
 - 检测会启动 `sing-box` 子进程，并在完成后清理。
-- 刷新检测会访问订阅 URL、IP 情报 API、测速 URL 和路由查询服务。
+- 刷新检测会访问订阅 URL、IP 情报 API 和测速 URL；当前尚未测量路由，绕路与骨干网状态为 `null`（未知）。
+- 出口 IP 查询失败时保留未知，情报缺失不视为 Clean；情报异常不会覆盖已测得的 TTFB。旧版情报结果需重新刷新后更新。
+- 过滤与测速并发限制由同一后端进程的所有刷新任务共享。
 - 默认普通刷新不测速；测速刷新由用户输入每区域数量，并可选择强制探测。
-- 当前 API 设计用于本机使用，不包含公网部署、鉴权、Docker 或反向代理配置。
+- 当前 API 设计用于本机使用；Docker 默认只映射本机端口，公网或共享部署仍须另行加入鉴权。

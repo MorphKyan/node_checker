@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createApiClient, enhancedUrl } from "./api";
+import { createApiClient, enhancedUrl, singboxUrl } from "./api";
 
 describe("api client", () => {
   it("lists subscriptions", async () => {
@@ -18,11 +18,17 @@ describe("api client", () => {
 
   it("builds enhanced subscription URLs", () => {
     expect(enhancedUrl("", "sub_1", { mode: "detailed", format: "plain", valid_only: false, limit: 20 })).toBe(
-      "/subscriptions/enhanced?subscription_id=sub_1&mode=detailed&format=plain&valid_only=false&limit=20",
+      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub_1&mode=detailed&format=plain&valid_only=false&limit=20`,
     );
     expect(enhancedUrl("", ["sub_1", "sub_2"], { mode: "compact", format: "base64", valid_only: true })).toBe(
-      "/subscriptions/enhanced?subscription_id=sub_1&subscription_id=sub_2&mode=compact&format=base64&valid_only=true",
+      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub_1&subscription_id=sub_2&mode=compact&format=base64&valid_only=true`,
     );
+  });
+
+  it("copies absolute URLs using the configured API origin", () => {
+    expect(singboxUrl("", ["sub_1"])).toBe(`${window.location.origin}/subscriptions/singbox?subscription_id=sub_1`);
+    expect(singboxUrl("http://api.local/", ["sub_1"])).toBe("http://api.local/subscriptions/singbox?subscription_id=sub_1");
+    expect(enhancedUrl("http://api.local", "sub_1", { mode: "compact", format: "plain", valid_only: true })).toMatch(/^http:\/\/api.local\/subscriptions\/enhanced/);
   });
 
   it("passes enhanced export limits to preview requests", async () => {
@@ -157,7 +163,7 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenCalledWith("/subscriptions/sub%2Fwith%20space/results", expect.any(Object));
     expect(enhancedUrl("", "sub/with space", { mode: "compact", format: "base64", valid_only: true })).toBe(
-      "/subscriptions/enhanced?subscription_id=sub%2Fwith+space&mode=compact&format=base64&valid_only=true",
+      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub%2Fwith+space&mode=compact&format=base64&valid_only=true`,
     );
     vi.unstubAllGlobals();
   });

@@ -104,26 +104,21 @@ class ApiStore:
     @classmethod
     def init_db(cls) -> None:
         """Compatibility name retained for callers; no database is created."""
-        with cls._config_lock:
-            cls.data_dir().mkdir(parents=True, exist_ok=True)
-            config = cls._read_json(cls.config_path())
-            if not isinstance(config, dict):
-                cls._atomic_write(cls.config_path(), cls._default_config())
-            else:
-                changed = False
-                defaults = cls._default_config()
-                for key, value in defaults.items():
-                    if key not in config:
-                        config[key] = value
-                        changed = True
-                if changed:
-                    cls._atomic_write(cls.config_path(), config)
+        cls._config()
 
     @classmethod
     def _config(cls) -> dict[str, Any]:
-        cls.init_db()
-        config = cls._read_json(cls.config_path(), cls._default_config())
-        return config if isinstance(config, dict) else cls._default_config()
+        with cls._config_lock:
+            cls.data_dir().mkdir(parents=True, exist_ok=True)
+            try:
+                with cls.config_path().open(encoding="utf-8") as file:
+                    config = json.load(file)
+            except FileNotFoundError:
+                config = cls._default_config()
+                cls._atomic_write(cls.config_path(), config)
+            if not isinstance(config, dict):
+                raise ValueError("config.json must contain a JSON object; file preserved")
+            return {**cls._default_config(), **config}
 
     @classmethod
     def _save_config(cls, config: dict[str, Any]) -> None:

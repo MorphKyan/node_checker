@@ -2,13 +2,8 @@ import type { ExportFormat, ExportMode, LocalPreferences } from "./types";
 
 const storageKey = "vless-node-checker.preferences";
 
-function defaultApiBaseUrl(): string {
-  if (typeof window === "undefined") return "";
-  return window.location.port === "5173" ? "" : "";
-}
-
 export const defaultPreferences: LocalPreferences = {
-  apiBaseUrl: defaultApiBaseUrl(),
+  apiBaseUrl: "",
   autoRefresh: true,
   defaultExportMode: "compact",
   defaultExportFormat: "base64",

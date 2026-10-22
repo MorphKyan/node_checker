@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import replace
+from math import isfinite
 from typing import Any
 
 from models import ApiVerdict, LabelEvidence, NodeProfile
@@ -70,14 +71,21 @@ def _label(label: str, confidence: float) -> LabelEvidence:
 
 
 def _first_number(value: Any) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.strip())
-        except ValueError:
-            return None
-    return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        number = float(value)
+        return number if isfinite(number) else None
+    except ValueError:
+        return None
+
+
+def _mapping(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _all_false(data: dict, keys: tuple[str, ...]) -> bool:
+    return all(data.get(key) is False for key in keys)
 
 
 def _estimated_risk(labels: list[LabelEvidence]) -> float | None:
@@ -96,91 +104,93 @@ def _company_type_label(company_type: str) -> LabelEvidence | None:
 class ProfileAdapters:
     @staticmethod
     def from_ipwhois(data: dict[str, Any] | None) -> ApiVerdict:
-        if not data or data.get("success") is not True:
-            return ApiVerdict("ipwho.is", raw_summary="No successful response")
+        if not isinstance(data, dict) or data.get("success") is not True:
+            return ApiVerdict("ipwho.is", status="no_data", raw_summary="No successful response")
 
-        security = data.get("security") or {}
+        security = _mapping(data.get("security"))
         network_labels = []
         risk_labels = []
         summary = []
 
-        if security.get("hosting"):
+        if security.get("hosting") is True:
             network_labels.append(_label("hosting", 0.85))
             summary.append("hosting=true")
-        if security.get("proxy"):
+        if security.get("proxy") is True:
             risk_labels.append(_label("proxy", 0.90))
             summary.append("proxy=true")
-        if security.get("vpn"):
+        if security.get("vpn") is True:
             risk_labels.append(_label("vpn", 0.90))
             summary.append("vpn=true")
-        if security.get("tor"):
+        if security.get("tor") is True:
             risk_labels.append(_label("tor", 0.95))
             summary.append("tor=true")
 
-        if not risk_labels:
+        if not risk_labels and _all_false(security, ("proxy", "vpn", "tor")):
             risk_labels.append(_label("clean", 0.55))
             summary.append("security clean")
 
         all_risk_labels = risk_labels + network_labels
         return ApiVerdict(
             source="ipwho.is",
+            status="success" if risk_labels else "no_data",
             network_labels=network_labels,
             risk_labels=risk_labels,
-            risk_score=_estimated_risk(all_risk_labels),
+            risk_score=_estimated_risk(all_risk_labels) if risk_labels else None,
             raw_summary=", ".join(summary),
         )
 
     @staticmethod
     def from_ipapi(data: dict[str, Any] | None) -> ApiVerdict:
-        if not data:
-            return ApiVerdict("ipapi.is", raw_summary="No successful response")
+        if not isinstance(data, dict) or not data or data.get("error"):
+            return ApiVerdict("ipapi.is", status="no_data", raw_summary="No successful response")
 
         network_labels = []
         risk_labels = []
         summary = []
 
-        if data.get("is_datacenter"):
+        if data.get("is_datacenter") is True:
             network_labels.append(_label("datacenter", 0.90))
             summary.append("is_datacenter=true")
-        if data.get("is_proxy"):
+        if data.get("is_proxy") is True:
             risk_labels.append(_label("proxy", 0.90))
             summary.append("is_proxy=true")
-        if data.get("is_vpn"):
+        if data.get("is_vpn") is True:
             risk_labels.append(_label("vpn", 0.90))
             summary.append("is_vpn=true")
-        if data.get("is_tor"):
+        if data.get("is_tor") is True:
             risk_labels.append(_label("tor", 0.95))
             summary.append("is_tor=true")
-        if data.get("is_abuser"):
+        if data.get("is_abuser") is True:
             risk_labels.append(_label("abuser", 0.85))
             summary.append("is_abuser=true")
 
-        company_type = str((data.get("company") or {}).get("type") or "")
+        company_type = str(_mapping(data.get("company")).get("type") or "")
         company_label = _company_type_label(company_type)
         if company_label:
             network_labels.append(company_label)
             summary.append(f"company.type={company_type}")
 
-        if not risk_labels:
+        if not risk_labels and _all_false(data, ("is_proxy", "is_vpn", "is_tor", "is_abuser")):
             risk_labels.append(_label("clean", 0.55))
             summary.append("risk clean")
 
         all_risk_labels = risk_labels + network_labels
         return ApiVerdict(
             source="ipapi.is",
+            status="success" if risk_labels else "no_data",
             network_labels=network_labels,
             risk_labels=risk_labels,
-            risk_score=_estimated_risk(all_risk_labels),
+            risk_score=_estimated_risk(all_risk_labels) if risk_labels else None,
             raw_summary=", ".join(summary),
         )
 
     @staticmethod
     def from_scamalytics(data: dict[str, Any] | None) -> ApiVerdict:
-        if not data:
-            return ApiVerdict("Scamalytics", raw_summary="No successful response")
+        if not isinstance(data, dict) or not data:
+            return ApiVerdict("Scamalytics", status="no_data", raw_summary="No successful response")
 
         scam = data.get("scamalytics") if isinstance(data.get("scamalytics"), dict) else data
-        proxy_data = scam.get("scamalytics_proxy") or {}
+        proxy_data = _mapping(scam.get("scamalytics_proxy"))
         network_labels = []
         risk_labels = []
         summary = []
@@ -194,16 +204,16 @@ class ProfileAdapters:
         if risk:
             summary.append(f"risk={risk}")
 
-        if proxy_data.get("is_datacenter"):
+        if proxy_data.get("is_datacenter") is True:
             network_labels.append(_label("datacenter", 0.85))
             summary.append("is_datacenter=true")
-        if proxy_data.get("is_vpn"):
+        if proxy_data.get("is_vpn") is True:
             risk_labels.append(_label("vpn", 0.90))
             summary.append("is_vpn=true")
-        if proxy_data.get("is_tor"):
+        if proxy_data.get("is_tor") is True:
             risk_labels.append(_label("tor", 0.95))
             summary.append("is_tor=true")
-        if proxy_data.get("is_public_proxy") or proxy_data.get("is_web_proxy"):
+        if proxy_data.get("is_public_proxy") is True or proxy_data.get("is_web_proxy") is True:
             risk_labels.append(_label("proxy", 0.90))
             summary.append("is_proxy=true")
 
@@ -211,22 +221,23 @@ class ProfileAdapters:
             lowered_risk = risk.lower()
             if "high" in lowered_risk and score is not None and score >= 70:
                 risk_labels.append(_label("abuser", 0.65))
-            else:
+            elif score is not None and score < 70 and _all_false(proxy_data, ("is_vpn", "is_tor", "is_public_proxy", "is_web_proxy")):
                 risk_labels.append(_label("clean", 0.50))
                 summary.append("proxy clean")
 
         return ApiVerdict(
             source="Scamalytics",
+            status="success" if risk_labels or score is not None else "no_data",
             network_labels=network_labels,
             risk_labels=risk_labels,
-            risk_score=score if score is not None else _estimated_risk(risk_labels + network_labels),
+            risk_score=score if score is not None else (_estimated_risk(risk_labels + network_labels) if risk_labels else None),
             raw_summary=", ".join(summary),
         )
 
     @staticmethod
     def from_proxycheck(data: dict[str, Any] | None, ip: str = "") -> ApiVerdict:
-        if not data or data.get("status") != "ok":
-            return ApiVerdict("proxycheck.io", raw_summary="No successful response")
+        if not isinstance(data, dict) or data.get("status") != "ok":
+            return ApiVerdict("proxycheck.io", status="no_data", raw_summary="No successful response")
 
         result = data.get(ip) if ip else None
         if not isinstance(result, dict):
@@ -235,10 +246,10 @@ class ProfileAdapters:
                     result = value
                     break
         if not isinstance(result, dict):
-            return ApiVerdict("proxycheck.io", raw_summary="No IP result")
+            return ApiVerdict("proxycheck.io", status="no_data", raw_summary="No IP result")
 
-        detections = result.get("detections") or {}
-        network = result.get("network") or {}
+        detections = _mapping(result.get("detections"))
+        network = _mapping(result.get("network"))
         network_labels = []
         risk_labels = []
         summary = []
@@ -249,19 +260,19 @@ class ProfileAdapters:
             network_labels.append(network_label)
             summary.append(f"network.type={network_type}")
 
-        if detections.get("hosting"):
+        if detections.get("hosting") is True:
             network_labels.append(_label("hosting", 0.85))
             summary.append("hosting=true")
-        if detections.get("proxy"):
+        if detections.get("proxy") is True:
             risk_labels.append(_label("proxy", 0.95))
             summary.append("proxy=true")
-        if detections.get("vpn"):
+        if detections.get("vpn") is True:
             risk_labels.append(_label("vpn", 0.90))
             summary.append("vpn=true")
-        if detections.get("tor"):
+        if detections.get("tor") is True:
             risk_labels.append(_label("tor", 0.98))
             summary.append("tor=true")
-        if detections.get("compromised"):
+        if detections.get("compromised") is True:
             risk_labels.append(_label("abuser", 0.80))
             summary.append("compromised=true")
 
@@ -272,26 +283,27 @@ class ProfileAdapters:
         if confidence is not None:
             summary.append(f"confidence={confidence:g}")
 
-        if not risk_labels:
+        if not risk_labels and _all_false(detections, ("proxy", "vpn", "tor")):
             risk_labels.append(_label("clean", 0.80 if confidence is None else min(0.90, confidence / 100)))
             summary.append("detections clean")
 
         return ApiVerdict(
             source="proxycheck.io",
+            status="success" if risk_labels or risk is not None else "no_data",
             network_labels=network_labels,
             risk_labels=risk_labels,
-            risk_score=risk if risk is not None else _estimated_risk(risk_labels + network_labels),
+            risk_score=risk if risk is not None else (_estimated_risk(risk_labels + network_labels) if risk_labels else None),
             raw_summary=", ".join(summary),
         )
 
     @staticmethod
     def from_abstract(data: dict[str, Any] | None) -> ApiVerdict:
-        if not data or not isinstance(data.get("security"), dict):
-            return ApiVerdict("Abstract API", raw_summary="No successful response")
+        if not isinstance(data, dict) or not isinstance(data.get("security"), dict):
+            return ApiVerdict("Abstract API", status="no_data", raw_summary="No successful response")
 
-        security = data.get("security") or {}
-        asn = data.get("asn") or {}
-        company = data.get("company") or {}
+        security = _mapping(data.get("security"))
+        asn = _mapping(data.get("asn"))
+        company = _mapping(data.get("company"))
         network_labels = []
         risk_labels = []
         summary = []
@@ -302,41 +314,42 @@ class ProfileAdapters:
             network_labels.append(company_label)
             summary.append(f"company.type={company_type}")
 
-        if security.get("is_hosting"):
+        if security.get("is_hosting") is True:
             network_labels.append(_label("hosting", 0.80))
             summary.append("is_hosting=true")
-        if security.get("is_mobile"):
+        if security.get("is_mobile") is True:
             network_labels.append(_label("mobile", 0.75))
             summary.append("is_mobile=true")
-        if security.get("is_proxy"):
+        if security.get("is_proxy") is True:
             risk_labels.append(_label("proxy", 0.85))
             summary.append("is_proxy=true")
-        if security.get("is_vpn"):
+        if security.get("is_vpn") is True:
             risk_labels.append(_label("vpn", 0.55))
             summary.append("is_vpn=true")
-        if security.get("is_tor"):
+        if security.get("is_tor") is True:
             risk_labels.append(_label("tor", 0.95))
             summary.append("is_tor=true")
-        if security.get("is_abuse"):
+        if security.get("is_abuse") is True:
             risk_labels.append(_label("abuser", 0.80))
             summary.append("is_abuse=true")
 
-        if not risk_labels:
+        if not risk_labels and _all_false(security, ("is_proxy", "is_vpn", "is_tor", "is_abuse")):
             risk_labels.append(_label("clean", 0.55))
             summary.append("security clean")
 
         return ApiVerdict(
             source="Abstract API",
+            status="success" if risk_labels else "no_data",
             network_labels=network_labels,
             risk_labels=risk_labels,
-            risk_score=_estimated_risk(risk_labels + network_labels),
+            risk_score=_estimated_risk(risk_labels + network_labels) if risk_labels else None,
             raw_summary=", ".join(summary),
         )
 
     @staticmethod
     def from_ip2location(data: dict[str, Any] | None) -> ApiVerdict:
-        if not data or data.get("error"):
-            return ApiVerdict("IP2Location.io", raw_summary="No successful response")
+        if not isinstance(data, dict) or data.get("error"):
+            return ApiVerdict("IP2Location.io", status="no_data", raw_summary="No successful response")
 
         network_labels = []
         risk_labels = []
@@ -368,21 +381,22 @@ class ProfileAdapters:
         elif proxy_type in {"PUB", "WEB", "SES", "RES"}:
             risk_labels.append(_label("proxy", 0.85))
 
-        fraud_score = _first_number(proxy.get("fraud_score") or data.get("fraud_score"))
+        fraud_score = _first_number(proxy.get("fraud_score", data.get("fraud_score")))
         if fraud_score is not None:
             summary.append(f"fraud_score={fraud_score:g}")
             if fraud_score >= 75 and not risk_labels:
                 risk_labels.append(_label("abuser", 0.65))
 
-        if not risk_labels:
+        if not risk_labels and data.get("is_proxy") is False:
             risk_labels.append(_label("clean", 0.50))
             summary.append("proxy clean")
 
         return ApiVerdict(
             source="IP2Location.io",
+            status="success" if risk_labels or fraud_score is not None else "no_data",
             network_labels=network_labels,
             risk_labels=risk_labels,
-            risk_score=fraud_score if fraud_score is not None else _estimated_risk(risk_labels + network_labels),
+            risk_score=fraud_score if fraud_score is not None else (_estimated_risk(risk_labels + network_labels) if risk_labels else None),
             raw_summary=", ".join(summary),
         )
 
@@ -469,22 +483,6 @@ class NodeProfileAggregator:
             if score >= threshold
         ]
         return ranked[:limit] if limit is not None else ranked
-
-    @staticmethod
-    def _risk_from_aggregated_labels(
-        network_labels: list[LabelEvidence],
-        risk_labels: list[LabelEvidence],
-    ) -> float:
-        labels = network_labels + risk_labels
-        weighted = [
-            (RISK_BY_LABEL[item.label], item.confidence)
-            for item in labels
-            if item.label in RISK_BY_LABEL
-        ]
-        if not weighted:
-            return 0.0
-        total_weight = sum(weight for _, weight in weighted)
-        return sum(score * weight for score, weight in weighted) / total_weight
 
     @staticmethod
     def _confidence_label(confidence: float) -> str:

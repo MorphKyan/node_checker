@@ -39,6 +39,8 @@ def make_node_fingerprint(node: ProxyNode) -> str:
             "path": getattr(node, "path", ""),
             "host": getattr(node, "host", ""),
             "flow": getattr(node, "flow", ""),
+            "alpn": getattr(node, "alpn", ""),
+            "mode": getattr(node, "mode", ""),
         }
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

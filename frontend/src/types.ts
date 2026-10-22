@@ -55,8 +55,8 @@ export interface NodeProbe {
   network_labels: string[];
   type_labels: string[];
   confidence: string;
-  is_detour: boolean;
-  is_backbone: boolean;
+  is_detour: boolean | null;
+  is_backbone: boolean | null;
   backbone_info: string;
   evidence: ApiVerdict[];
 }

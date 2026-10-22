@@ -1132,7 +1132,7 @@ function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }
               <Detail label="ASN" value={node.probe.asn_org} />
               <Detail label="拒绝原因" value={node.reject_reason || "-"} />
               <Detail label="骨干网" value={node.probe.backbone_info || "-"} />
-              <Detail label="绕路状态" value={node.probe.is_detour ? "Yes" : "No"} />
+              <Detail label="绕路状态" value={node.probe.is_detour === null ? "未知" : node.probe.is_detour ? "Yes" : "No"} />
               <Detail label="判定置信度" value={node.probe.confidence} />
               <Detail label="TCP 延迟" value={`${node.probe.tcp_ping_ms} ms`} />
               <Detail label="HTTP TTFB" value={`${node.probe.ttfb_ms} ms`} />

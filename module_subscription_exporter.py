@@ -177,21 +177,16 @@ class SubscriptionExporter:
 
     @staticmethod
     def sort_nodes(nodes: list[TestedNode], valid_only: bool = True) -> list[TestedNode]:
-        indexed_nodes = [
-            (index, node)
-            for index, node in enumerate(nodes)
-            if not valid_only or node.analyzed_node.is_valid
-        ]
-        indexed_nodes.sort(
-            key=lambda item: (
-                item[1].analyzed_node.probe.profile.risk_score is None,
-                item[1].analyzed_node.probe.profile.risk_score if item[1].analyzed_node.probe.profile.risk_score is not None else 101,
-                item[1].analyzed_node.probe.ttfb_ms,
-                -(item[1].download_speed_mbps or 0),
-                item[0],
-            )
+        return sorted(
+            (node for node in nodes if not valid_only or node.analyzed_node.is_valid),
+            key=lambda node: (
+                not node.analyzed_node.is_valid,
+                node.analyzed_node.probe.profile.risk_score is None,
+                node.analyzed_node.probe.profile.risk_score or 0,
+                node.analyzed_node.probe.ttfb_ms,
+                -(node.download_speed_mbps or 0),
+            ),
         )
-        return [node for _, node in indexed_nodes]
 
     @staticmethod
     def deduplicate_names(names: list[str], max_length: int) -> list[str]:

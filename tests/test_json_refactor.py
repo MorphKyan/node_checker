@@ -122,13 +122,26 @@ class JsonRefactorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ApiStore.update_api_site("disabled-key", {"enabled": True})
 
-    def test_corrupt_config_recovers_to_defaults(self):
+    def test_corrupt_config_is_preserved_and_reported(self):
         ApiStore.init_db()
         config = Path(settings.DATA_DIR) / "config.json"
-        config.write_text("{not json", encoding="utf-8")
+        for contents in ("{not json", "[]", "null"):
+            with self.subTest(contents=contents):
+                config.write_text(contents, encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    ApiStore.init_db()
+                with self.assertRaises(ValueError):
+                    ApiStore.get_api_sites(public=False)
+                self.assertEqual(config.read_text(encoding="utf-8"), contents)
+
+    def test_unreadable_config_is_not_replaced(self):
         ApiStore.init_db()
-        recovered = ApiStore.get_api_sites(public=False)
-        self.assertEqual([site["id"] for site in recovered], ["ipwhois", "ipapi", "scamalytics", "proxycheck", "abstract", "ip2location"])
+        config = ApiStore.config_path()
+        before = config.read_bytes()
+        with patch.object(Path, "open", side_effect=PermissionError("unreadable")):
+            with self.assertRaises(PermissionError):
+                ApiStore.init_db()
+        self.assertEqual(config.read_bytes(), before)
 
     def test_atomic_write_failure_preserves_previous_config(self):
         ApiStore.init_db()

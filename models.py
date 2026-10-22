@@ -78,8 +78,8 @@ class ProbeData:
     actual_geo: str
     asn_org: str
     trace_path: str = ""
-    is_detour: bool = False
-    is_backbone: bool = False
+    is_detour: bool | None = None
+    is_backbone: bool | None = None
     backbone_info: str = ""
     profile: NodeProfile = field(default_factory=NodeProfile)
     ipv6_support: bool = False

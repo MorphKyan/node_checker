@@ -63,6 +63,9 @@ def restore_node_profile(data) -> NodeProfile:
 def restore_probe_data(data: dict) -> ProbeData:
     allowed = {field.name for field in fields(ProbeData)}
     data = {key: value for key, value in dict(data).items() if key in allowed}
+    if not data.get("trace_path"):
+        # Historical probes stored false even when no route was measured.
+        data["is_detour"] = data["is_backbone"] = None
     if "profile" in data:
         data["profile"] = restore_node_profile(data["profile"])
     return ProbeData(**data)

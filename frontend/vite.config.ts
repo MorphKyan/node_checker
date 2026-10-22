@@ -30,6 +30,9 @@ export default defineConfig({
       "/subscriptions": apiTarget,
       "/jobs": apiTarget,
       "/settings": apiTarget,
+      "/api-sites": apiTarget,
+      "/exit-ip-endpoint": apiTarget,
+      "/singbox/templates": apiTarget,
     },
   },
   test: {

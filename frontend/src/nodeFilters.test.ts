@@ -50,6 +50,16 @@ const emptyFilters = {
 };
 
 describe("filterNodes", () => {
+  it("keeps unmeasured routes out of both yes and no filters", () => {
+    const node = makeNode({ probe: { ...makeNode({}).probe, is_detour: null, is_backbone: null } });
+    expect(filterNodes([node], emptyFilters)).toEqual([node]);
+    for (const field of ["detourFilter", "backboneFilter"]) {
+      for (const value of ["yes", "no"]) {
+        expect(filterNodes([node], { ...emptyFilters, [field]: value })).toEqual([]);
+      }
+    }
+  });
+
   it("filters by profile, risk, latency, and route attributes", () => {
     const nodes = [
       makeNode({ fingerprint: "good" }),

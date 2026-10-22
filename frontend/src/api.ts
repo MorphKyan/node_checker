@@ -202,7 +202,7 @@ function enhancedPath(id: string | string[], params: { mode: ExportMode; format:
 }
 
 export function enhancedUrl(baseUrl: string, id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number; max_risk?: number }): string {
-  return joinUrl(baseUrl, enhancedPath(id, params));
+  return new URL(joinUrl(baseUrl, enhancedPath(id, params)), window.location.origin).href;
 }
 
 export function singboxUrl(
@@ -218,5 +218,5 @@ export function singboxUrl(
   if (params?.valid_only !== undefined) query.append("valid_only", String(params.valid_only));
   if (params?.limit !== undefined) query.append("limit", String(params.limit));
   if (params?.max_risk !== undefined) query.append("max_risk", String(params.max_risk));
-  return joinUrl(baseUrl, `/subscriptions/singbox?${query.toString()}`);
+  return new URL(joinUrl(baseUrl, `/subscriptions/singbox?${query.toString()}`), window.location.origin).href;
 }

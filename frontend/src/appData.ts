@@ -33,8 +33,9 @@ export function useAppData(api: ApiClient, preferences: LocalPreferences) {
       queryKey: ["job", preferences.apiBaseUrl, jobId],
       queryFn: () => api.getJob(jobId),
       refetchInterval: (query: { state: { data?: JobStatus } }) => {
+        if (!preferences.autoRefresh) return false;
         const status = query.state.data?.status;
-        return preferences.autoRefresh && (status === "queued" || status === "running") ? 2_000 : 15_000;
+        return status === "queued" || status === "running" ? 2_000 : false;
       },
     })),
   });

@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy everything including local prebuilt frontend/dist
+# Copy source and prebuilt frontend/dist; private data is excluded by .dockerignore
 COPY . .
 
 # Set environment variables for docker setup
@@ -31,6 +31,9 @@ ENV DATA_DIR=/app/data
 
 # Expose FastAPI server port
 EXPOSE 8000
+
+HEALTHCHECK --interval=5s --timeout=5s --start-period=30s --retries=12 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/subscriptions', timeout=4).read()"
 
 # Start application
 CMD ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000"]

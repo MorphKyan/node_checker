@@ -113,6 +113,12 @@ python -m pip install -r requirements.txt
 
 默认会查询预置且已启用的站点。请在仪表盘的“API 站点”页中配置 URL 模板、权重、启用状态和本地 API Key；Key 不会由读取接口返回，也不会写入任务结果快照。
 
+IP 情报查询通过当前被检测节点的 SOCKS 隧道发出，DNS 也经由代理解析；请求中的目标 IP 为该节点检测到的出口 IP。节点无法访问情报站点时不会回退到本机直连。
+
+API 请求每次超时为 3 秒（订阅获取与 IPv6 查询也共用此值）。出口 IP 与情报查询遇到超时、连接错误、响应解析异常或 HTTP 5xx 时最多重试 1 次；HTTP 429 和其他 4xx 不重试，缺少风险字段也不重复请求。节点检测默认并发 10 个，可通过运行设置 `FILTER_CONCURRENCY` 调整；同一节点的已启用情报站点并发查询。
+
+Net.Coffee 使用其网页查询接口 `https://ip.net.coffee/api/ip/lookup/{ip}`，无需 Key。原始信任分 `trust_score`（越高越可信）保留在证据摘要中，按 `100 - trust_score` 转为项目风险分。该接口尚无公开 API 文档或额度承诺，可能变更；已有配置可在“API 站点”页添加 `netcoffee` 类型的站点。
+
 ## CLI 使用
 
 启动交互式检测：

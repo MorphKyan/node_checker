@@ -57,39 +57,49 @@ class LightweightProbe:
 
     @staticmethod
     async def _fetch_exit_ip(socks5_url: str, endpoint: str) -> tuple[str, dict | None]:
-        try:
-            connector = ProxyConnector.from_url(socks5_url, rdns=True)
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(endpoint, timeout=settings.API_TIMEOUT) as response:
-                    if response.status != 200:
-                        return "", None
-                    text = await response.text()
-                    try:
-                        data = json.loads(text)
-                    except (TypeError, ValueError):
-                        data = None
-                    if isinstance(data, dict):
-                        if data.get("error") or data.get("success") is False:
+        for attempt in range(2):
+            try:
+                connector = ProxyConnector.from_url(socks5_url, rdns=True)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    async with session.get(endpoint, timeout=settings.API_TIMEOUT) as response:
+                        if response.status >= 500 and attempt == 0:
+                            continue
+                        if response.status != 200:
                             return "", None
-                        return str(ipaddress.ip_address(data.get("ip", ""))), data
-                    return str(ipaddress.ip_address(text.strip())), None
-        except Exception:
-            return "", None
+                        text = await response.text()
+                        try:
+                            data = json.loads(text)
+                        except (TypeError, ValueError):
+                            data = None
+                        if isinstance(data, dict):
+                            if data.get("error") or data.get("success") is False:
+                                return "", None
+                            return str(ipaddress.ip_address(data.get("ip", ""))), data
+                        return str(ipaddress.ip_address(text.strip())), None
+            except Exception:
+                if attempt == 1:
+                    return "", None
 
     @staticmethod
-    async def _fetch_site(site: dict, ip: str) -> tuple[dict | None, str]:
-        try:
-            url = str(site["url_template"]).format(ip=urllib.parse.quote(ip, safe=""), key=urllib.parse.quote(str(site.get("api_key", "")), safe=""))
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=settings.API_TIMEOUT) as response:
-                    if response.status == 429: return None, "rate_limited"
-                    if response.status != 200: return None, "error"
-                    data = await response.json(content_type=None)
-                    return (data, "success") if isinstance(data, dict) else (None, "no_data")
-        except asyncio.TimeoutError:
-            return None, "timeout"
-        except Exception:
-            return None, "error"
+    async def _fetch_site(site: dict, ip: str, socks5_url: str) -> tuple[dict | None, str]:
+        for attempt in range(2):
+            try:
+                url = str(site["url_template"]).format(ip=urllib.parse.quote(ip, safe=""), key=urllib.parse.quote(str(site.get("api_key", "")), safe=""))
+                connector = ProxyConnector.from_url(socks5_url, rdns=True)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    async with session.get(url, timeout=settings.API_TIMEOUT) as response:
+                        if response.status == 429: return None, "rate_limited"
+                        if response.status >= 500 and attempt == 0:
+                            continue
+                        if response.status != 200: return None, "error"
+                        data = await response.json(content_type=None)
+                        return (data, "success") if isinstance(data, dict) else (None, "no_data")
+            except asyncio.TimeoutError:
+                if attempt == 1:
+                    return None, "timeout"
+            except Exception:
+                if attempt == 1:
+                    return None, "error"
 
     @staticmethod
     def _verdict_for_site(site: dict, data: dict | None, status: str, ip: str) -> ApiVerdict:
@@ -108,7 +118,7 @@ class LightweightProbe:
         actual_ip, exit_data = await LightweightProbe._fetch_exit_ip(socks5_url, probe_config["exit_ip_endpoint"])
         sites = [site for site in probe_config["api_sites"] if site.get("enabled")]
         responses = (
-            await asyncio.gather(*(LightweightProbe._fetch_site(site, actual_ip) for site in sites))
+            await asyncio.gather(*(LightweightProbe._fetch_site(site, actual_ip, socks5_url) for site in sites))
             if actual_ip else [(None, "no_data")] * len(sites)
         )
         verdicts = [LightweightProbe._verdict_for_site(site, data, status, actual_ip) for site, (data, status) in zip(sites, responses)]
@@ -118,9 +128,11 @@ class LightweightProbe:
         for data in [exit_data] + [data for data, status in responses if status == "success"]:
             if not isinstance(data, dict) or data.get("error") or data.get("success") is False:
                 continue
-            country = data.get("country_code") or data.get("country")
+            country = data.get("country_code") or data.get("countryCode") or data.get("country")
             if geo == "Unknown" and isinstance(country, str) and len(country) == 2 and country.isalpha():
                 geo = country.upper()
+            if not asn and isinstance(data.get("asOrganization"), str):
+                asn = data["asOrganization"]
             for key in ("connection", "company", "asn"):
                 connection = data.get(key)
                 if isinstance(connection, dict):

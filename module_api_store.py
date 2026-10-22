@@ -29,6 +29,7 @@ DEFAULT_API_SITES = [
     {"id": "proxycheck", "column_name": "proxycheck.io", "provider": "proxycheck", "url_template": "https://proxycheck.io/v3/{ip}", "api_key": "", "weight": 1.3, "enabled": True, "order": 3},
     {"id": "abstract", "column_name": "Abstract API", "provider": "abstract", "url_template": "https://ip-intelligence.abstractapi.com/v1/?api_key={key}&ip_address={ip}", "api_key": "", "weight": 0.8, "enabled": False, "order": 4},
     {"id": "ip2location", "column_name": "IP2Location.io", "provider": "ip2location", "url_template": "https://api.ip2location.io/?ip={ip}&format=json", "api_key": "", "weight": 0.6, "enabled": True, "order": 5},
+    {"id": "netcoffee", "column_name": "Net.Coffee", "provider": "netcoffee", "url_template": "https://ip.net.coffee/api/ip/lookup/{ip}", "api_key": "", "weight": 1.0, "enabled": True, "order": 6},
 ]
 
 
@@ -172,7 +173,7 @@ class ApiStore:
 
     @staticmethod
     def provider_types() -> list[str]:
-        return ["ipwhois", "ipapi", "scamalytics", "proxycheck", "abstract", "ip2location"]
+        return ["ipwhois", "ipapi", "scamalytics", "proxycheck", "abstract", "ip2location", "netcoffee"]
 
     @classmethod
     def _validate_site(cls, data: dict[str, Any]) -> dict[str, Any]:

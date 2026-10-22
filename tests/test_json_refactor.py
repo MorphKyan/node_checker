@@ -59,6 +59,15 @@ class JsonRefactorTests(unittest.TestCase):
         self.assertEqual(result["api_sites_snapshot"][0]["id"], "ipwhois")
         self.assertNotIn("api_key", result["api_sites_snapshot"][0])
 
+    def test_netcoffee_can_be_registered_without_key(self):
+        with TestClient(app) as client:
+            self.assertIn("netcoffee", client.get("/api-sites/providers").json())
+            response = client.post("/api-sites", json={"id": "coffee-test", "column_name": "Net.Coffee",
+                "provider": "netcoffee", "url_template": "https://ip.net.coffee/api/ip/lookup/{ip}",
+                "weight": 1, "enabled": True})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["enabled"])
+
     def test_enabled_key_template_cannot_be_cleared(self):
         ApiStore.create_api_site({"id": "keyed", "column_name": "Keyed", "provider": "ipwhois", "url_template": "https://example.test/{ip}?key={key}", "api_key": "secret", "weight": 1, "enabled": True})
         with self.assertRaisesRegex(ValueError, "API key"):

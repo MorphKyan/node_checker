@@ -185,6 +185,18 @@ class ProfileAdapters:
         )
 
     @staticmethod
+    def from_netcoffee(data: dict[str, Any] | None) -> ApiVerdict:
+        if not isinstance(data, dict) or not data or data.get("error"):
+            return ApiVerdict("Net.Coffee", status="no_data", raw_summary="No successful response")
+        verdict = ProfileAdapters.from_ipapi({**data, "company": {"type": data.get("company_type")}})
+        trust = _first_number(data.get("trust_score"))
+        if trust is None or not 0 <= trust <= 100:
+            return replace(verdict, source="Net.Coffee")
+        # Net.Coffee trust increases with quality; our risk increases with danger.
+        return replace(verdict, source="Net.Coffee", status="success", risk_score=100 - trust,
+                       raw_summary=f"trust_score={trust:g}/100; {verdict.raw_summary}")
+
+    @staticmethod
     def from_scamalytics(data: dict[str, Any] | None) -> ApiVerdict:
         if not isinstance(data, dict) or not data:
             return ApiVerdict("Scamalytics", status="no_data", raw_summary="No successful response")

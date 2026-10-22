@@ -7,6 +7,28 @@ from module_profile import ProfileAdapters, NodeProfileAggregator
 
 
 class ProfileAdapterTests(unittest.TestCase):
+    def test_netcoffee_converts_trust_and_keeps_network_flags(self):
+        verdict = ProfileAdapters.from_netcoffee({
+            "trust_score": 72, "company_type": "hosting", "is_datacenter": True,
+            "is_proxy": False, "is_vpn": False, "is_tor": False, "is_abuser": False,
+        })
+        self.assertEqual(verdict.source, "Net.Coffee")
+        self.assertEqual(verdict.risk_score, 28)
+        self.assertEqual(verdict.status, "success")
+        self.assertIn("datacenter", [label.label for label in verdict.network_labels])
+        self.assertIn("trust_score=72/100", verdict.raw_summary)
+
+    def test_netcoffee_missing_or_invalid_score_is_not_clean(self):
+        for score in (None, True, "invalid", float("nan"), float("inf"), -1, 101):
+            with self.subTest(score=score):
+                verdict = ProfileAdapters.from_netcoffee({"trust_score": score})
+                self.assertIsNone(verdict.risk_score)
+                self.assertEqual(verdict.status, "no_data")
+                self.assertEqual(verdict.risk_labels, [])
+        self.assertEqual(ProfileAdapters.from_netcoffee({"trust_score": 0}).risk_score, 100)
+        self.assertEqual(ProfileAdapters.from_netcoffee({"trust_score": 100}).risk_score, 0)
+        self.assertIsNone(ProfileAdapters.from_netcoffee({"error": "denied", "trust_score": 100}).risk_score)
+
     def test_ipwhois_vpn_hosting(self):
         verdict = ProfileAdapters.from_ipwhois({
             "success": True,

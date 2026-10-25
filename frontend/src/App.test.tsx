@@ -296,7 +296,7 @@ describe("App", () => {
   it.each([[], ["one"], ["two"], ["one", "two"]].flatMap((disabledIds) => [false, true].map((current) => ({ disabledIds, current }))))("only displays enabled API sites ($disabledIds, current=$current)", ({ disabledIds, current }) => {
     const node: NodeResult = {
       fingerprint: "fp", original_name: "node", enhanced_name_compact: "compact node", enhanced_name_detailed: "detailed node", raw_uri: "vless://x", compact_uri: "vless://x", detailed_uri: "vless://x", is_valid: true, reject_reason: "", download_speed_mbps: null, speedtest_status: "not_tested",
-      probe: { tcp_ping_ms: 1, ttfb_ms: 2, actual_ip: "1.1.1.1", actual_geo: "US", asn_org: "asn", ipv6_support: false, actual_ipv6: "", risk_score: 10, network_labels: [], type_labels: [], confidence: "low", is_detour: false, is_backbone: false, backbone_info: "", evidence: [{ source: "One", site_id: "one", status: "success", network_labels: [], risk_labels: [], risk_score: 12, raw_summary: "" }, { source: "Two", site_id: "two", status: "timeout", network_labels: [], risk_labels: [], risk_score: null, raw_summary: "" }] },
+      probe: { tcp_ping_ms: 12.34, ttfb_ms: 56.78, actual_ip: "1.1.1.1", actual_geo: "US", asn_org: "asn", ipv6_support: false, actual_ipv6: "", risk_score: 10, network_labels: [], type_labels: [], confidence: "low", is_detour: false, is_backbone: false, backbone_info: "", evidence: [{ source: "One", site_id: "one", status: "success", network_labels: [], risk_labels: [], risk_score: 12, raw_summary: "normalized summary", raw_data: { trust_score: 88, ai_verdict: { reasoning: "original reasoning" } } }, { source: "Two", site_id: "two", status: "timeout", network_labels: [], risk_labels: [], risk_score: null, raw_summary: "legacy summary" }] },
     };
     const result: SubscriptionResults = { subscription_id: "sub", status: "completed", subscription_status: "completed", node_count: 1, valid_count: 1, updated_at: 1, nodes: [node], api_sites_snapshot: [{ id: "one", column_name: "One", provider: "ipwhois", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 0, api_key_configured: false }, { id: "two", column_name: "Two", provider: "ipapi", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 1, api_key_configured: false }] };
     const sites = result.api_sites_snapshot.map((site) => ({ ...site, enabled: !disabledIds.includes(site.id) }));
@@ -315,6 +315,14 @@ describe("App", () => {
     node.probe.route_status = "partial";
     node.probe.trace_path = "1: 59.43.1.1 [AS4809 电信 CN2]";
     render(<NodeDrawer node={node} sites={sites} onClose={() => {}} />);
+    expect(screen.getByText("12 ms")).toBeInTheDocument();
+    expect(screen.getByText("57 ms")).toBeInTheDocument();
+    expect(screen.getByText("数据源画像")).toBeInTheDocument();
+    expect(Boolean(screen.queryByText("trust_score"))).toBe(!disabledIds.includes("one"));
+    expect(Boolean(screen.queryByText("original reasoning"))).toBe(!disabledIds.includes("one"));
+    expect(Boolean(screen.queryByText("legacy summary"))).toBe(!disabledIds.includes("two"));
+    expect(screen.queryByText("normalized summary")).not.toBeInTheDocument();
+    expect(screen.queryByText(/风险评分:/)).not.toBeInTheDocument();
     expect(screen.getByText("部分路径")).toBeInTheDocument();
     expect(screen.getByText("1: 59.43.1.1 [AS4809 电信 CN2]")).toBeInTheDocument();
     for (const site of sites) {

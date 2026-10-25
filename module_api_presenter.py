@@ -127,6 +127,7 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                             ],
                             "risk_score": verdict.risk_score,
                             "raw_summary": verdict.raw_summary,
+                            "raw_data": verdict.raw_data,
                         }
                         for verdict in profile.evidence
                     ],

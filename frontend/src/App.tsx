@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { SourceData } from "./components/SourceData";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -1101,8 +1102,8 @@ export function NodeDrawer({ node, sites, onClose }: { node: NodeResult; sites?:
               <Detail label="入口路径观测到的网络" value={node.probe.backbone_info || "未知"} />
               <Detail label="绕路状态" value={node.probe.is_detour === null ? "未知" : node.probe.is_detour ? "Yes" : "No"} />
               <Detail label="判定置信度" value={node.probe.confidence} />
-              <Detail label="TCP 延迟" value={`${node.probe.tcp_ping_ms} ms`} />
-              <Detail label="HTTP TTFB" value={`${node.probe.ttfb_ms} ms`} />
+              <Detail label="TCP 延迟" value={`${node.probe.tcp_ping_ms.toFixed(0)} ms`} />
+              <Detail label="HTTP TTFB" value={`${node.probe.ttfb_ms.toFixed(0)} ms`} />
             </div>
           </Panel>
 
@@ -1117,60 +1118,28 @@ export function NodeDrawer({ node, sites, onClose }: { node: NodeResult; sites?:
           </Panel>
 
           <Panel>
-            <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">数据源画像详情 (Evidence)</div>
+            <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">数据源画像</div>
             <div className="space-y-3">
               {evidence.length ? (
                 evidence.map((verdict) => (
-                  <div key={verdict.source} className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 text-xs">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                      <span className="font-bold text-slate-700">{verdict.source}</span>
-                      {verdict.risk_score !== null && (
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          verdict.risk_score > 70 ? 'bg-red-100 text-red-700' :
-                          verdict.risk_score > 30 ? 'bg-amber-100 text-amber-700' :
-                          'bg-emerald-100 text-emerald-700'
-                        }`}>
-                          风险评分: {verdict.risk_score}%
+                  <div key={verdict.site_id || verdict.source} className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+                    <div className="mb-3 flex items-center justify-between gap-3 border-b border-slate-100 pb-2">
+                      <span className="font-semibold text-slate-800">{verdict.source}</span>
+                      {verdict.status !== "success" && (
+                        <span className="shrink-0 rounded bg-slate-100 px-2 py-1 text-slate-500">
+                          {{ timeout: "请求超时", rate_limited: "请求受限", error: "请求或解析失败", no_data: verdict.raw_data ? "无可用风险判定" : "无数据" }[verdict.status]}
                         </span>
                       )}
                     </div>
-
-                    <div className="space-y-1.5">
-                      {verdict.network_labels && verdict.network_labels.length > 0 && (
-                        <div className="flex items-start gap-1 flex-wrap">
-                          <span className="text-slate-400 font-medium shrink-0">属性:</span>
-                          {verdict.network_labels.map((lbl) => (
-                            <span key={lbl.label} className="inline-flex items-center bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded text-[10px] font-medium">
-                              {lbl.display} ({(lbl.confidence * 100).toFixed(0)}%)
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {verdict.risk_labels && verdict.risk_labels.length > 0 && (
-                        <div className="flex items-start gap-1 flex-wrap">
-                          <span className="text-slate-400 font-medium shrink-0">信誉:</span>
-                          {verdict.risk_labels.map((lbl) => (
-                            <span key={lbl.label} className={`inline-flex items-center border px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              lbl.label === 'clean' 
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                : 'bg-red-50 text-red-700 border-red-100'
-                            }`}>
-                              {lbl.display} ({(lbl.confidence * 100).toFixed(0)}%)
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="flex items-start gap-1">
-                        <span className="text-slate-400 font-medium shrink-0">原始摘要:</span>
-                        <span className="text-slate-600 break-all font-mono">{verdict.raw_summary || "No signal"}</span>
-                      </div>
-                    </div>
+                    {verdict.raw_data != null ? (
+                      <SourceData value={verdict.raw_data} />
+                    ) : (
+                      <div className="whitespace-pre-wrap break-words text-slate-600">{verdict.raw_summary || "暂无原始结果，重新探测后可查看"}</div>
+                    )}
                   </div>
                 ))
               ) : (
-                <div className="text-slate-500 py-2 text-center">No source evidence available</div>
+                <div className="text-slate-500 py-2 text-center">暂无数据源画像</div>
               )}
             </div>
           </Panel>

@@ -33,6 +33,8 @@ export interface LabelEvidence {
   display: string;
 }
 
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 export interface ApiVerdict {
   source: string;
   site_id: string;
@@ -41,6 +43,7 @@ export interface ApiVerdict {
   risk_labels: LabelEvidence[];
   risk_score: number | null;
   raw_summary: string;
+  raw_data?: { [key: string]: JsonValue } | null;
 }
 
 export interface NodeProbe {

@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 from models import AnalyzedNode, ApiVerdict, Hy2Node, LabelEvidence, NodeProfile, ProbeData, SsNode, TestedNode, VlessNode
 from module_result_codec import restore_probe_data, restore_proxy_node, restore_tested_nodes
+from module_api_presenter import build_detail_nodes
 
 
 def make_node() -> TestedNode:
@@ -33,6 +34,17 @@ def make_node() -> TestedNode:
 
 
 class ResultCodecTests(unittest.TestCase):
+    def test_raw_source_data_survives_storage_and_detail_api(self):
+        node = make_node()
+        raw_data = {"trust_score": 72, "ai_verdict": {"label": "original"}, "flags": [False, 0, None]}
+        node.analyzed_node.probe.profile.evidence[0].raw_data = raw_data
+        restored = restore_tested_nodes(json.loads(json.dumps([asdict(node)])))
+        self.assertEqual(restored[0].analyzed_node.probe.profile.evidence[0].raw_data, raw_data)
+        self.assertEqual(build_detail_nodes(restored)[0]["probe"]["evidence"][0]["raw_data"], raw_data)
+        legacy = asdict(node)
+        del legacy["analyzed_node"]["probe"]["profile"]["evidence"][0]["raw_data"]
+        self.assertIsNone(restore_tested_nodes([legacy])[0].analyzed_node.probe.profile.evidence[0].raw_data)
+
     def test_entrance_route_evidence_survives_storage(self):
         data = asdict(make_node().analyzed_node.probe)
         data.update(route_target="1.1.1.1", route_status="completed", trace_path="1: 59.43.1.1 [AS4809 电信 CN2]",

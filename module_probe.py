@@ -107,13 +107,13 @@ class LightweightProbe:
     def _verdict_for_site(site: dict, data: dict | None, status: str, ip: str) -> ApiVerdict:
         adapter = getattr(ProfileAdapters, f"from_{site['provider']}", None)
         if status != "success" or not data or not adapter:
-            return ApiVerdict(source=site.get("column_name", site["id"]), site_id=site["id"], status=status if status != "success" else "no_data")
+            return ApiVerdict(source=site.get("column_name", site["id"]), site_id=site["id"], status=status if status != "success" else "no_data", raw_data=data)
         try:
             verdict = adapter(data, ip) if site["provider"] == "proxycheck" else adapter(data)
             has_evidence = verdict.risk_score is not None or bool(verdict.risk_labels)
-            return replace(verdict, source=site.get("column_name", site["id"]), site_id=site["id"], status="success" if has_evidence else "no_data")
+            return replace(verdict, source=site.get("column_name", site["id"]), site_id=site["id"], status="success" if has_evidence else "no_data", raw_data=data)
         except Exception:
-            return ApiVerdict(source=site.get("column_name", site["id"]), site_id=site["id"], status="error")
+            return ApiVerdict(source=site.get("column_name", site["id"]), site_id=site["id"], status="error", raw_data=data)
 
     @staticmethod
     async def _ip_intelligence(socks5_url: str, probe_config: dict):

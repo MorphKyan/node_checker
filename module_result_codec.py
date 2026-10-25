@@ -37,6 +37,7 @@ def _restore_api_verdict(data) -> ApiVerdict:
         risk_labels=_restore_label_evidence(data.get("risk_labels")),
         risk_score=data.get("risk_score"),
         raw_summary=data.get("raw_summary", ""),
+        raw_data=data.get("raw_data"),
     )
 
 

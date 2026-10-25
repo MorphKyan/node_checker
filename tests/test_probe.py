@@ -8,6 +8,18 @@ from settings import settings
 
 
 class LightweightProbeTests(unittest.TestCase):
+    def test_source_responses_survive_normalization_and_adapter_errors(self):
+        site = {"id": "coffee", "provider": "netcoffee"}
+        for data in ({"trust_score": 72, "ai_verdict": {"reasoning": "original"}},
+                     {"custom_field": [False, 0, None]}, {}, None):
+            with self.subTest(data=data):
+                verdict = LightweightProbe._verdict_for_site(site, data, "success", "1.1.1.1")
+                self.assertEqual(verdict.raw_data, data)
+        with patch("module_probe.ProfileAdapters.from_netcoffee", side_effect=ValueError("bad schema")):
+            verdict = LightweightProbe._verdict_for_site(site, {"unexpected": "kept"}, "success", "1.1.1.1")
+        self.assertEqual(verdict.status, "error")
+        self.assertEqual(verdict.raw_data, {"unexpected": "kept"})
+
     def setUp(self):
         route = patch("module_probe.EntranceRouteProbe.probe", new=AsyncMock(return_value={}))
         self.route = route.start()

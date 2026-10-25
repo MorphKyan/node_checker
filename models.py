@@ -60,6 +60,7 @@ class ApiVerdict:
     risk_labels: list[LabelEvidence] = field(default_factory=list)
     risk_score: float | None = None
     raw_summary: str = ""
+    raw_data: dict | None = None
 
 @dataclass
 class NodeProfile:

@@ -218,7 +218,7 @@ class AsyncAuditRegressionTests(unittest.IsolatedAsyncioTestCase):
         async def filter_node(node, sem, **kwargs):
             async with sem: await work("filter")
             return tested_node().analyzed_node
-        async def speed_node(node):
+        async def speed_node(node, *, precise=False):
             await work("speed")
             return TestedNode(node)
         with patch.object(settings, "FILTER_CONCURRENCY", 1), patch.object(settings, "SPEEDTEST_CONCURRENCY", 1), \

@@ -50,10 +50,12 @@ class SubscriptionRefreshService:
     def select_speedtest_nodes_per_region(
         analyzed_nodes: list[AnalyzedNode],
         speedtest_limit: int,
+        coarse_results: list[TestedNode] | None = None,
     ) -> tuple[list[AnalyzedNode], list[AnalyzedNode]]:
         limit = max(0, int(speedtest_limit))
-        valid_nodes = [node for node in analyzed_nodes if node.is_valid]
-        invalid_nodes = [node for node in analyzed_nodes if not node.is_valid]
+        speeds = {id(item.analyzed_node): item.download_speed_mbps for item in coarse_results or []}
+        valid_nodes = [node for node in analyzed_nodes if node.is_valid and (coarse_results is None or speeds.get(id(node)) is not None)]
+        invalid_nodes = [node for node in analyzed_nodes if not node.is_valid or (coarse_results is not None and speeds.get(id(node)) is None)]
         if limit <= 0:
             return [], valid_nodes + invalid_nodes
 
@@ -65,7 +67,7 @@ class SubscriptionRefreshService:
         nodes_to_test: list[AnalyzedNode] = []
         nodes_to_skip: list[AnalyzedNode] = []
         for region_nodes in nodes_by_region.values():
-            region_nodes.sort(key=lambda node: (node.probe.profile.risk_score is None, node.probe.profile.risk_score or 0, node.probe.ttfb_ms))
+            region_nodes.sort(key=lambda node: (-(speeds.get(id(node)) or 0), node.probe.profile.risk_score is None, node.probe.profile.risk_score or 0, node.probe.ttfb_ms))
             nodes_to_test.extend(region_nodes[:limit])
             nodes_to_skip.extend(region_nodes[limit:])
 
@@ -134,7 +136,7 @@ class SubscriptionRefreshService:
                 await TunnelController.stop_tunnel(process, config_path)
 
     @staticmethod
-    async def run_speed_test(node_analyzed: AnalyzedNode) -> TestedNode:
+    async def run_speed_test(node_analyzed: AnalyzedNode, *, precise: bool = False) -> TestedNode:
         process = None
         config_path = None
         try:
@@ -143,7 +145,7 @@ class SubscriptionRefreshService:
             local_port = get_free_local_port()
             process, config_path = await TunnelController.start_tunnel(node_analyzed.node, local_port)
             socks5_url = f"socks5://127.0.0.1:{local_port}"
-            return await BandwidthTester.run_speed_test(node_analyzed, socks5_url)
+            return await BandwidthTester.run_speed_test(node_analyzed, socks5_url, precise=precise)
         except Exception as e:
             print(f"[SpeedTest Tunnel Error] {node_analyzed.node.remark}: {e}")
             return TestedNode(node_analyzed, None, "failed")
@@ -177,26 +179,29 @@ class SubscriptionRefreshService:
             *(filter_with_progress(node) for node in nodes)
         )
 
-        nodes_to_test, nodes_to_skip = cls.select_speedtest_nodes_per_region(
-            analyzed_nodes,
-            speedtest_limit,
-        )
-
-        if progress_callback:
-            progress_callback("speedtest", 0, len(nodes_to_test))
-
         speed_processed = 0
+        coarse_nodes = [node for node in analyzed_nodes if node.is_valid] if speedtest_limit > 0 else []
+        speed_total = len(coarse_nodes)
+        if progress_callback:
+            progress_callback("speedtest", 0, speed_total)
 
-        async def speed_with_progress(node: AnalyzedNode) -> TestedNode:
+        async def speed_with_progress(node: AnalyzedNode, *, precise: bool = False) -> TestedNode:
             nonlocal speed_processed
             async with cls.limit("SPEEDTEST_CONCURRENCY"):
-                result = await cls.run_speed_test(node)
+                result = await cls.run_speed_test(node, precise=precise)
             speed_processed += 1
             if progress_callback:
-                progress_callback("speedtest", speed_processed, len(nodes_to_test))
+                progress_callback("speedtest", speed_processed, speed_total)
             return result
 
-        tested_nodes = await asyncio.gather(*(speed_with_progress(node) for node in nodes_to_test))
+        coarse_results = await asyncio.gather(*(speed_with_progress(node) for node in coarse_nodes))
+        nodes_to_test, nodes_to_skip = cls.select_speedtest_nodes_per_region(
+            analyzed_nodes, speedtest_limit, coarse_results if speedtest_limit > 0 else None,
+        )
+        speed_total += len(nodes_to_test)
+        if progress_callback:
+            progress_callback("speedtest", speed_processed, speed_total)
+        tested_nodes = await asyncio.gather(*(speed_with_progress(node, precise=True) for node in nodes_to_test))
         tested_nodes.extend(TestedNode(node, None, "not_tested") for node in nodes_to_skip)
         return tested_nodes
 

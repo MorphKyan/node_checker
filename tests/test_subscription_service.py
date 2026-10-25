@@ -79,7 +79,7 @@ class SubscriptionRefreshServiceTests(unittest.TestCase):
             async def fake_filter(node, sem, force_probe=False, api_sites=None, probe_config=None):
                 return make_analyzed_node(node)
 
-            async def fake_speed_test(analyzed_node):
+            async def fake_speed_test(analyzed_node, *, precise=False):
                 nonlocal active, max_active
                 active += 1
                 max_active = max(max_active, active)
@@ -144,6 +144,43 @@ class SubscriptionRefreshServiceTests(unittest.TestCase):
         nodes[4].node.expected_geo = nodes[4].probe.actual_geo = "US"
         selected, _ = SubscriptionRefreshService.select_speedtest_nodes_per_region(nodes, 1)
         self.assertEqual(selected, [nodes[3], nodes[4]])
+
+    def test_two_stage_speedtest_selects_fastest_per_region_and_keeps_all_nodes(self):
+        nodes = [make_analyzed_node(make_node(i, geo)) for i, geo in enumerate(["JP", "JP", "US", "US", "JP"])]
+        nodes[-1].is_valid = False
+        coarse_speeds = [1, 20, 10, None]
+        calls = []
+        progress = []
+
+        async def speed(node, *, precise=False):
+            index = nodes.index(node)
+            calls.append((index, precise))
+            value = 99 if precise else coarse_speeds[index]
+            return TestedNode(node, value, "success" if value is not None else "failed")
+
+        with (
+            patch.object(SubscriptionRefreshService, "process_node_filter", side_effect=nodes),
+            patch.object(SubscriptionRefreshService, "run_speed_test", side_effect=speed),
+        ):
+            results = asyncio.run(SubscriptionRefreshService.run_nodes(
+                [node.node for node in nodes], speedtest_limit=1,
+                progress_callback=lambda *args: progress.append(args),
+            ))
+        self.assertEqual(calls, [(0, False), (1, False), (2, False), (3, False), (1, True), (2, True)])
+        self.assertEqual(len(results), 5)
+        self.assertEqual([item.download_speed_mbps for item in results[:2]], [99, 99])
+        self.assertTrue(all(item.download_speed_mbps is None for item in results[2:]))
+        self.assertEqual(progress[-1], ("speedtest", 6, 6))
+
+    def test_failed_coarse_test_does_not_run_cloudflare(self):
+        node = make_analyzed_node(make_node(1))
+        with (
+            patch.object(SubscriptionRefreshService, "process_node_filter", return_value=node),
+            patch.object(SubscriptionRefreshService, "run_speed_test", return_value=TestedNode(node, None, "failed")) as speed,
+        ):
+            results = asyncio.run(SubscriptionRefreshService.run_nodes([node.node], speedtest_limit=1))
+        speed.assert_awaited_once_with(node, precise=False)
+        self.assertEqual(results, [TestedNode(node)])
 
 
 if __name__ == "__main__":

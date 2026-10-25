@@ -26,7 +26,7 @@ class Config:
     API_TIMEOUT = 3.0
     SPEEDTEST_TIMEOUT = 10.0
     SUBSCRIPTION_MAX_M = 2
-    SPEEDTEST_MAX_M = 8
+    SPEEDTEST_MAX_M = 10
 
     # 测试目标 URLs
     TTFB_TARGET_URL = "http://www.gstatic.com/generate_204"

@@ -21,13 +21,23 @@ describe("App", () => {
       is_valid: true, reject_reason: "", download_speed_mbps: null, speedtest_status: "not_tested",
       probe: { tcp_ping_ms: 1, ttfb_ms: 2, actual_ip: "1.1.1.1", actual_geo: "JP", asn_org: "ASN", ipv6_support: false, actual_ipv6: "", risk_score: null, network_labels: [], type_labels: [], confidence: "low", is_detour: null, is_backbone: null, backbone_info: "", evidence: [] },
     };
-    const nodes = [node, { ...node, fingerprint: "us", original_name: "US node", probe: { ...node.probe, actual_geo: "US" } }];
+    const nodes = [node, { ...node, fingerprint: "us", original_name: "US node", probe: { ...node.probe, actual_ip: "2.2.2.2", actual_geo: "US" } }, { ...node, fingerprint: "jp2", original_name: "JP sibling" }];
     const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
     client.setQueryData(["subscriptions", ""], [{ id: "sub", name: "Demo", url: "https://sub.test", last_status: "completed", node_count: 2, valid_count: 2, updated_at: 1 }]);
     client.setQueryData(["results", "", "sub", "https://sub.test"], { nodes, api_sites_snapshot: [] });
     render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
     fireEvent.click(screen.getByRole("button", { name: "节点详情" }));
+    const group = screen.getByRole("button", { name: /1\.1\.1\.1.*2 个节点/ });
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("JP node")).not.toBeInTheDocument();
+    fireEvent.click(group);
+    expect(screen.getByText("JP node")).toBeInTheDocument();
+    expect(screen.getByText("JP sibling")).toBeInTheDocument();
+    fireEvent.click(group);
+    expect(screen.queryByText("JP sibling")).not.toBeInTheDocument();
+    fireEvent.click(group);
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    fireEvent.click(screen.getByRole("button", { name: /2\.2\.2\.2.*1 个节点/ }));
     expect(screen.getByText("US node")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "原始名称" }));
     expect(screen.getByText("1 / 2")).toBeInTheDocument();
@@ -291,12 +301,13 @@ describe("App", () => {
     const result: SubscriptionResults = { subscription_id: "sub", status: "completed", subscription_status: "completed", node_count: 1, valid_count: 1, updated_at: 1, nodes: [node], api_sites_snapshot: [{ id: "one", column_name: "One", provider: "ipwhois", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 0, api_key_configured: false }, { id: "two", column_name: "Two", provider: "ipapi", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 1, api_key_configured: false }] };
     const sites = result.api_sites_snapshot.map((site) => ({ ...site, enabled: !disabledIds.includes(site.id) }));
     if (!current) result.api_sites_snapshot = sites;
-    render(<NodesView subscriptions={[]} selectedId="sub" result={result} sites={current ? sites : undefined} filteredNodes={[node]} pagedNodes={[node]} sort={null} onSort={() => {}} page={1} totalPages={1} pageSize={20} geoOptions={[]} networkOptions={[]} typeOptions={[]} filters={{ nodeSearch: "", nodeValidity: "all", nodeGeo: "all", nodeNetwork: "all", nodeType: "all", maxRisk: "", maxTtfb: "", minSpeed: "", detourFilter: "all", backboneFilter: "all" }} onSelectSubscription={() => {}} onFilters={() => {}} onPage={() => {}} onDetails={() => {}} />);
+    render(<NodesView subscriptions={[]} selectedId="sub" result={result} sites={current ? sites : undefined} filteredNodes={[node]} sort={null} onSort={() => {}} page={1} pageSize={20} geoOptions={[]} networkOptions={[]} typeOptions={[]} filters={{ nodeSearch: "", nodeValidity: "all", nodeGeo: "all", nodeNetwork: "all", nodeType: "all", maxRisk: "", maxTtfb: "", minSpeed: "", detourFilter: "all", backboneFilter: "all" }} onSelectSubscription={() => {}} onFilters={() => {}} onPage={() => {}} onDetails={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /1\.1\.1\.1.*1 个节点/ }));
     const headers = screen.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[↕↑↓]$/, ""));
     expect(headers).not.toContain("增强名称");
     expect(screen.queryByText("compact node")).not.toBeInTheDocument();
     expect(headers.slice(8, -1)).toEqual([...(disabledIds.includes("one") ? [] : ["One"]), ...(disabledIds.includes("two") ? [] : ["Two"])]);
-    const cells = screen.getAllByRole("cell").map((cell) => cell.textContent);
+    const cells = screen.getAllByRole("cell").slice(1).map((cell) => cell.textContent);
     expect(cells.slice(8, -1)).toEqual([...(disabledIds.includes("one") ? [] : ["-风险 12"]), ...(disabledIds.includes("two") ? [] : ["timeout"])]);
     expect(cells).toHaveLength(headers.length);
     cleanup();

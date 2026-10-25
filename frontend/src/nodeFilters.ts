@@ -1,5 +1,17 @@
 import type { NodeResult } from "./types";
 
+export function groupNodesByExitIp(nodes: NodeResult[]) {
+  const groups = new Map<string, { key: string; ip: string; nodes: NodeResult[] }>();
+  nodes.forEach((node, index) => {
+    const ip = node.probe.actual_ip.trim();
+    const key = ip ? `ip:${ip}` : `unknown:${node.fingerprint}:${index}`;
+    const group = groups.get(key);
+    if (group) group.nodes.push(node);
+    else groups.set(key, { key, ip, nodes: [node] });
+  });
+  return Array.from(groups.values());
+}
+
 export type NodeSortKey = "name" | "status" | "geo" | "ping" | "ttfb" | "risk" | "speed" | "asn" | `site:${string}`;
 export interface NodeSort { key: NodeSortKey; direction: "asc" | "desc" }
 

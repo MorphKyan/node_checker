@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterNodes, sortNodes, type NodeSortKey } from "./nodeFilters";
+import { filterNodes, groupNodesByExitIp, sortNodes, type NodeSortKey } from "./nodeFilters";
 import type { NodeResult } from "./types";
 
 function makeNode(overrides: Partial<NodeResult>): NodeResult {
@@ -106,5 +106,21 @@ describe("filterNodes", () => {
     });
 
     expect(result.map((node) => node.fingerprint)).toEqual(["good"]);
+  });
+});
+
+describe("groupNodesByExitIp", () => {
+  it("groups nonadjacent exits and keeps unknown exits separate", () => {
+    const first = makeNode({ original_name: "first" });
+    const second = makeNode({ probe: { ...first.probe, actual_ip: "203.0.113.20" } });
+    const duplicate = makeNode({ original_name: "duplicate" });
+    const unknown = makeNode({ probe: { ...first.probe, actual_ip: "" } });
+    const nodes = [first, second, duplicate, unknown, unknown];
+    const groups = groupNodesByExitIp(nodes);
+    expect(groups.map((group) => group.nodes)).toEqual([[first, duplicate], [second], [unknown], [unknown]]);
+    expect(new Set(groups.map((group) => group.key)).size).toBe(4);
+    expect(groupNodesByExitIp(filterNodes(nodes, { ...emptyFilters, nodeSearch: "duplicate" }))[0].nodes).toEqual([duplicate]);
+    expect(groupNodesByExitIp([])).toEqual([]);
+    expect(nodes).toEqual([first, second, duplicate, unknown, unknown]);
   });
 });

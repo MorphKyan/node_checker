@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -37,7 +37,7 @@ import { ApiError, createApiClient, enhancedUrl } from "./api";
 import type { ApiClient } from "./api";
 import { useAppData } from "./appData";
 import { duration, formatTime, groupCount, riskBuckets, statusTone, stripComments } from "./appUtils";
-import { filterNodes, sortNodes, type NodeFilters, type NodeSort, type NodeSortKey } from "./nodeFilters";
+import { filterNodes, groupNodesByExitIp, sortNodes, type NodeFilters, type NodeSort, type NodeSortKey } from "./nodeFilters";
 import { defaultPreferences, isExportFormat, isExportMode, loadPreferences, savePreferences } from "./preferences";
 import type {
   ApiVerdict,
@@ -165,8 +165,6 @@ export default function App() {
     [selectedResult, nodeFilters, nodeSort],
   );
 
-  const totalPages = Math.max(1, Math.ceil(filteredNodes.length / preferences.pageSize));
-  const pagedNodes = filteredNodes.slice((page - 1) * preferences.pageSize, page * preferences.pageSize);
 
   const createSubscription = useMutation({
     mutationFn: api.createSubscription,
@@ -384,14 +382,12 @@ export default function App() {
               result={selectedResult}
               sites={apiSites.data?.sites}
               filteredNodes={filteredNodes}
-              pagedNodes={pagedNodes}
               sort={nodeSort}
               onSort={(key) => {
                 setNodeSort({ key, direction: nodeSort?.key === key && nodeSort.direction === "asc" ? "desc" : "asc" });
                 setPage(1);
               }}
               page={page}
-              totalPages={totalPages}
               pageSize={preferences.pageSize}
               geoOptions={geoOptions}
               networkOptions={networkOptions}
@@ -674,11 +670,9 @@ export function NodesView(props: {
   result: SubscriptionResults | null;
   sites?: ApiSite[];
   filteredNodes: NodeResult[];
-  pagedNodes: NodeResult[];
   sort: NodeSort | null;
   onSort: (key: NodeSortKey) => void;
   page: number;
-  totalPages: number;
   pageSize: number;
   geoOptions: string[];
   networkOptions: string[];
@@ -689,6 +683,12 @@ export function NodesView(props: {
   onPage: (page: number) => void;
   onDetails: (node: NodeResult) => void;
 }) {
+  const groups = groupNodesByExitIp(props.filteredNodes);
+  const totalPages = Math.max(1, Math.ceil(groups.length / props.pageSize));
+  const page = Math.min(props.page, totalPages);
+  const pagedGroups = groups.slice((page - 1) * props.pageSize, page * props.pageSize);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  useEffect(() => { setExpandedGroups(new Set()); }, [props.selectedId]);
   const [copiedKey, setCopiedKey] = useState("");
   const [activeCopyDropdown, setActiveCopyDropdown] = useState<string | null>(null);
   const visibleSites = (props.sites ?? props.result?.api_sites_snapshot ?? []).filter((site) => site.enabled);
@@ -744,8 +744,8 @@ export function NodesView(props: {
 
       <Panel>
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-semibold text-slate-900">节点表格 · {props.filteredNodes.length} 条</div>
-          <div className="text-xs text-slate-500">每页 {props.pageSize} 条</div>
+          <div className="text-sm font-semibold text-slate-900">出口分组 · {groups.length} 组 · {props.filteredNodes.length} 个节点</div>
+          <div className="text-xs text-slate-500">每页 {props.pageSize} 组</div>
         </div>
         {!props.result ? <EmptyState title="暂无检测结果" detail="订阅完成刷新后会在这里展示节点详情。" /> : (
           <div className="overflow-x-auto">
@@ -763,7 +763,25 @@ export function NodesView(props: {
                 </tr>
               </thead>
               <tbody>
-                {props.pagedNodes.map((node, index) => {
+                {pagedGroups.map((group) => (
+                  <Fragment key={group.key}>
+                    <tr className="border-t border-border bg-slate-50">
+                      <td colSpan={columns.length + 1} className="px-3 py-2">
+                        <button type="button" aria-expanded={expandedGroups.has(group.key)}
+                          className="flex w-full items-center gap-2 rounded text-left font-medium text-slate-800 focus-visible:outline-blue-600"
+                          onClick={() => setExpandedGroups((current) => {
+                            const next = new Set(current);
+                            if (next.has(group.key)) next.delete(group.key);
+                            else next.add(group.key);
+                            return next;
+                          })}>
+                          <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform ${expandedGroups.has(group.key) ? "" : "-rotate-90"}`} />
+                          <span>{group.ip || `出口地址未知 · ${group.nodes[0].original_name}`}</span>
+                          <span className="text-xs font-normal text-slate-500">{group.nodes.length} 个节点</span>
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedGroups.has(group.key) && group.nodes.map((node, index) => {
                   return (
                     <tr key={`${node.fingerprint}-${index}`} className="border-t border-border">
                       <td className="max-w-xs truncate px-3 py-3 font-medium" title={node.original_name}>{node.original_name}</td>
@@ -823,15 +841,17 @@ export function NodesView(props: {
                       </td>
                     </tr>
                   );
-                })}
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>
         )}
         <div className="mt-3 flex items-center justify-end gap-2">
-          <Button variant="secondary" disabled={props.page <= 1} onClick={() => props.onPage(props.page - 1)}>上一页</Button>
-          <span className="text-sm text-slate-500">{props.page} / {props.totalPages}</span>
-          <Button variant="secondary" disabled={props.page >= props.totalPages} onClick={() => props.onPage(props.page + 1)}>下一页</Button>
+          <Button variant="secondary" disabled={page <= 1} onClick={() => props.onPage(page - 1)}>上一页</Button>
+          <span className="text-sm text-slate-500">{page} / {totalPages}</span>
+          <Button variant="secondary" disabled={page >= totalPages} onClick={() => props.onPage(page + 1)}>下一页</Button>
         </div>
       </Panel>
     </div>

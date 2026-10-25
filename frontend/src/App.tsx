@@ -384,6 +384,7 @@ export default function App() {
               subscriptions={subscriptionList}
               selectedId={effectiveSubscriptionId}
               result={selectedResult}
+              sites={apiSites.data?.sites}
               filteredNodes={filteredNodes}
               pagedNodes={pagedNodes}
               page={page}
@@ -450,7 +451,7 @@ export default function App() {
         </div>
       </main>
 
-      {detailsNode && <NodeDrawer node={detailsNode} onClose={() => setDetailsNode(null)} />}
+      {detailsNode && <NodeDrawer node={detailsNode} sites={apiSites.data?.sites ?? selectedResult?.api_sites_snapshot} onClose={() => setDetailsNode(null)} />}
     </div>
   );
 }
@@ -668,6 +669,7 @@ export function NodesView(props: {
   subscriptions: SubscriptionSummary[];
   selectedId: string;
   result: SubscriptionResults | null;
+  sites?: ApiSite[];
   filteredNodes: NodeResult[];
   pagedNodes: NodeResult[];
   page: number;
@@ -684,6 +686,7 @@ export function NodesView(props: {
 }) {
   const [copiedKey, setCopiedKey] = useState("");
   const [activeCopyDropdown, setActiveCopyDropdown] = useState<string | null>(null);
+  const visibleSites = (props.sites ?? props.result?.api_sites_snapshot ?? []).filter((site) => site.enabled);
 
   useEffect(() => {
     function handleOutsideClick() {
@@ -744,11 +747,10 @@ export function NodesView(props: {
                   <th className="px-3 py-2">地区</th>
                   <th className="px-3 py-2">Ping</th>
                   <th className="px-3 py-2">TTFB</th>
-                  <th className="px-3 py-2">增强名称</th>
                   <th className="px-3 py-2">风险</th>
                   <th className="px-3 py-2">测速</th>
                   <th className="px-3 py-2">ASN</th>
-                  {(props.result?.api_sites_snapshot || []).map((site) => <th key={site.id} className="px-3 py-2">{site.column_name}</th>)}
+                  {visibleSites.map((site) => <th key={site.id} className="px-3 py-2">{site.column_name}</th>)}
                   <th className="px-3 py-2">操作</th>
                 </tr>
               </thead>
@@ -761,11 +763,10 @@ export function NodesView(props: {
                       <td className="px-3 py-3">{node.probe.actual_geo}</td>
                       <td className="px-3 py-3">{node.probe.tcp_ping_ms.toFixed(0)}</td>
                       <td className="px-3 py-3">{node.probe.ttfb_ms.toFixed(0)}</td>
-                      <td className="max-w-xs truncate px-3 py-3">{node.enhanced_name_compact}</td>
                       <td className="px-3 py-3">{node.probe.risk_score === null ? "未知" : node.probe.risk_score.toFixed(1)}</td>
                       <td className="px-3 py-3">{node.download_speed_mbps === null ? (node.speedtest_status === "failed" ? "失败" : "未测速") : node.download_speed_mbps.toFixed(2)}</td>
                       <td className="max-w-xs truncate px-3 py-3" title={node.probe.asn_org}>{node.probe.asn_org}</td>
-                      {(props.result?.api_sites_snapshot || []).map((site) => {
+                      {visibleSites.map((site) => {
                         const verdictForSite = node.probe.evidence.find((item) => item.site_id === site.id);
                         if (!verdictForSite) return <td key={site.id} className="px-3 py-3 text-slate-400">无数据</td>;
                         if (verdictForSite.status !== "success") return <td key={site.id} className="px-3 py-3 text-red-600">{verdictForSite.status}</td>;
@@ -1019,8 +1020,9 @@ function detectConflicts(evidence: ApiVerdict[]): string[] {
   return conflicts;
 }
 
-function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }) {
-  const conflicts = useMemo(() => detectConflicts(node.probe.evidence), [node]);
+export function NodeDrawer({ node, sites, onClose }: { node: NodeResult; sites?: ApiSite[]; onClose: () => void }) {
+  const evidence = node.probe.evidence.filter((verdict) => !sites || sites.some((site) => site.enabled && site.id === verdict.site_id));
+  const conflicts = detectConflicts(evidence);
 
   return (
     <div className="fixed inset-0 z-30 bg-slate-950/20">
@@ -1031,8 +1033,7 @@ function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }
         </div>
         <div className="mt-4 space-y-4 text-sm">
           <Panel>
-            <div className="font-semibold text-slate-800">{node.enhanced_name_detailed}</div>
-            <div className="mt-2 text-slate-500 break-all text-xs">{node.original_name}</div>
+            <div className="font-semibold text-slate-800 break-all">{node.original_name}</div>
           </Panel>
 
           <Panel>
@@ -1080,8 +1081,8 @@ function NodeDrawer({ node, onClose }: { node: NodeResult; onClose: () => void }
           <Panel>
             <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">数据源画像详情 (Evidence)</div>
             <div className="space-y-3">
-              {node.probe.evidence && node.probe.evidence.length ? (
-                node.probe.evidence.map((verdict) => (
+              {evidence.length ? (
+                evidence.map((verdict) => (
                   <div key={verdict.source} className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 text-xs">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
                       <span className="font-bold text-slate-700">{verdict.source}</span>

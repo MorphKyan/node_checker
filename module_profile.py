@@ -186,9 +186,18 @@ class ProfileAdapters:
 
     @staticmethod
     def from_netcoffee(data: dict[str, Any] | None) -> ApiVerdict:
-        if not isinstance(data, dict) or not data or data.get("error"):
+        if not isinstance(data, dict) or not data or data.get("error") or data.get("success") is False:
             return ApiVerdict("Net.Coffee", status="no_data", raw_summary="No successful response")
         verdict = ProfileAdapters.from_ipapi({**data, "company": {"type": data.get("company_type")}})
+        if data.get("is_mobile") is True:
+            verdict.network_labels = [_label("mobile", 0.90)]
+            verdict.raw_summary += ", is_mobile=true"
+        elif data.get("isResidential") is True and data.get("is_datacenter") is not True:
+            verdict.network_labels = [_label("residential", 0.90)]
+            verdict.raw_summary += ", isResidential=true"
+        ai = _mapping(data.get("ai_verdict"))
+        if ai.get("label"):
+            verdict.raw_summary += f"; AI: {ai['label']} ({ai.get('reasoning') or ''})"
         trust = _first_number(data.get("trust_score"))
         if trust is None or not 0 <= trust <= 100:
             return replace(verdict, source="Net.Coffee")
@@ -419,7 +428,7 @@ class NodeProfileAggregator:
     MAX_NETWORK_LABELS = 2
 
     @staticmethod
-    def aggregate(verdicts: list[ApiVerdict], source_weights: dict[str, float] | None = None) -> NodeProfile:
+    def aggregate(verdicts: list[ApiVerdict], source_weights: dict[str, float] | None = None, *, primary: ApiVerdict | None = None) -> NodeProfile:
         source_weights = source_weights or {}
         network_scores: dict[str, float] = defaultdict(float)
         risk_scores_by_label: dict[str, float] = defaultdict(float)
@@ -455,6 +464,13 @@ class NodeProfileAggregator:
         if any(item.label != "clean" for item in risk_labels):
             risk_labels = [item for item in risk_labels if item.label != "clean"]
 
+        # Use secondary sources only for dimensions the primary did not supply.
+        if primary is not None:
+            if primary.network_labels:
+                network_labels = list(primary.network_labels)
+            if primary.risk_labels:
+                risk_labels = list(primary.risk_labels)
+
         display_labels = [
             DISPLAY_LABELS[item.label]
             for item in network_labels + risk_labels
@@ -470,6 +486,9 @@ class NodeProfileAggregator:
             if risk_score_weight
             else None
         )
+
+        if primary is not None and primary.status == "success" and primary.risk_score is not None:
+            risk_score = primary.risk_score
 
         return NodeProfile(
             display_labels=display_labels,

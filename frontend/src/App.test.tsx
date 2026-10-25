@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import App, { NodesView } from "./App";
+import App, { NodeDrawer, NodesView } from "./App";
 import type { NodeResult, SubscriptionResults } from "./types";
 import { defaultPreferences } from "./preferences";
 
@@ -276,16 +276,27 @@ describe("App", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/exit-ip-endpoint"))).toBe(true);
   });
 
-  it("aligns API snapshot headers with their node cells", () => {
+  it.each([[], ["one"], ["two"], ["one", "two"]].flatMap((disabledIds) => [false, true].map((current) => ({ disabledIds, current }))))("only displays enabled API sites ($disabledIds, current=$current)", ({ disabledIds, current }) => {
     const node: NodeResult = {
-      fingerprint: "fp", original_name: "node", enhanced_name_compact: "node", enhanced_name_detailed: "node", raw_uri: "vless://x", compact_uri: "vless://x", detailed_uri: "vless://x", is_valid: true, reject_reason: "", download_speed_mbps: null, speedtest_status: "not_tested",
+      fingerprint: "fp", original_name: "node", enhanced_name_compact: "compact node", enhanced_name_detailed: "detailed node", raw_uri: "vless://x", compact_uri: "vless://x", detailed_uri: "vless://x", is_valid: true, reject_reason: "", download_speed_mbps: null, speedtest_status: "not_tested",
       probe: { tcp_ping_ms: 1, ttfb_ms: 2, actual_ip: "1.1.1.1", actual_geo: "US", asn_org: "asn", ipv6_support: false, actual_ipv6: "", risk_score: 10, network_labels: [], type_labels: [], confidence: "low", is_detour: false, is_backbone: false, backbone_info: "", evidence: [{ source: "One", site_id: "one", status: "success", network_labels: [], risk_labels: [], risk_score: 12, raw_summary: "" }, { source: "Two", site_id: "two", status: "timeout", network_labels: [], risk_labels: [], risk_score: null, raw_summary: "" }] },
     };
     const result: SubscriptionResults = { subscription_id: "sub", status: "completed", subscription_status: "completed", node_count: 1, valid_count: 1, updated_at: 1, nodes: [node], api_sites_snapshot: [{ id: "one", column_name: "One", provider: "ipwhois", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 0, api_key_configured: false }, { id: "two", column_name: "Two", provider: "ipapi", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 1, api_key_configured: false }] };
-    render(<NodesView subscriptions={[]} selectedId="sub" result={result} filteredNodes={[node]} pagedNodes={[node]} page={1} totalPages={1} pageSize={20} geoOptions={[]} networkOptions={[]} typeOptions={[]} filters={{ nodeSearch: "", nodeValidity: "all", nodeGeo: "all", nodeNetwork: "all", nodeType: "all", maxRisk: "", maxTtfb: "", minSpeed: "", detourFilter: "all", backboneFilter: "all" }} onSelectSubscription={() => {}} onFilters={() => {}} onPage={() => {}} onDetails={() => {}} />);
+    const sites = result.api_sites_snapshot.map((site) => ({ ...site, enabled: !disabledIds.includes(site.id) }));
+    if (!current) result.api_sites_snapshot = sites;
+    render(<NodesView subscriptions={[]} selectedId="sub" result={result} sites={current ? sites : undefined} filteredNodes={[node]} pagedNodes={[node]} page={1} totalPages={1} pageSize={20} geoOptions={[]} networkOptions={[]} typeOptions={[]} filters={{ nodeSearch: "", nodeValidity: "all", nodeGeo: "all", nodeNetwork: "all", nodeType: "all", maxRisk: "", maxTtfb: "", minSpeed: "", detourFilter: "all", backboneFilter: "all" }} onSelectSubscription={() => {}} onFilters={() => {}} onPage={() => {}} onDetails={() => {}} />);
     const headers = screen.getAllByRole("columnheader").map((header) => header.textContent);
-    expect(headers.slice(9, 11)).toEqual(["One", "Two"]);
+    expect(headers).not.toContain("增强名称");
+    expect(screen.queryByText("compact node")).not.toBeInTheDocument();
+    expect(headers.slice(8, -1)).toEqual([...(disabledIds.includes("one") ? [] : ["One"]), ...(disabledIds.includes("two") ? [] : ["Two"])]);
     const cells = screen.getAllByRole("cell").map((cell) => cell.textContent);
-    expect(cells.slice(9, 11)).toEqual(["-风险 12", "timeout"]);
+    expect(cells.slice(8, -1)).toEqual([...(disabledIds.includes("one") ? [] : ["-风险 12"]), ...(disabledIds.includes("two") ? [] : ["timeout"])]);
+    expect(cells).toHaveLength(headers.length);
+    cleanup();
+    render(<NodeDrawer node={node} sites={sites} onClose={() => {}} />);
+    for (const site of sites) {
+      expect(Boolean(screen.queryByText(site.column_name))).toBe(site.enabled);
+    }
+    expect(screen.queryByText("detailed node")).not.toBeInTheDocument();
   });
 });

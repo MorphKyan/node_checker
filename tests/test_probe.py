@@ -8,6 +8,25 @@ from settings import settings
 
 
 class LightweightProbeTests(unittest.TestCase):
+    def test_netcoffee_is_primary_regardless_of_site_order_and_falls_back_on_failure(self):
+        async def run_case():
+            sites = [{"id": "secondary", "provider": "ipapi", "enabled": True},
+                     {"id": "coffee-custom", "provider": "netcoffee", "enabled": True, "column_name": "Custom"}]
+            secondary = {"countryCode": "US", "asOrganization": "Secondary ASN", "is_datacenter": True, "is_proxy": True}
+            coffee = {"countryCode": "au", "asOrganization": "Primary ASN", "trust_score": 95, "isResidential": True}
+            for data, status, expected in ((coffee, "success", ("AU", "Primary ASN", 5)),
+                                           (None, "timeout", ("JP", "Exit ASN", 80))):
+                with (
+                    self.subTest(status=status),
+                    patch.object(LightweightProbe, "_fetch_exit_ip", new=AsyncMock(return_value=("1.1.1.1", {"countryCode": "JP", "asOrganization": "Exit ASN"}))),
+                    patch.object(LightweightProbe, "_fetch_site", new=AsyncMock(side_effect=[(secondary, "success"), (data, status)])),
+                ):
+                    _, geo, asn, profile = await LightweightProbe._ip_intelligence(
+                        "socks5://unused", {"api_sites": sites, "exit_ip_endpoint": "https://exit.test"})
+                    self.assertEqual((geo, asn, profile.risk_score), expected)
+                    self.assertEqual(len(profile.evidence), 2)
+        asyncio.run(run_case())
+
     def test_api_retry_once_and_three_second_timeout(self):
         async def run_case():
             site = {"url_template": "https://example.test/{ip}"}

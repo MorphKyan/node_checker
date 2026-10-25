@@ -117,7 +117,9 @@ IP 情报查询通过当前被检测节点的 SOCKS 隧道发出，DNS 也经由
 
 API 请求每次超时为 3 秒（订阅获取与 IPv6 查询也共用此值）。出口 IP 与情报查询遇到超时、连接错误、响应解析异常或 HTTP 5xx 时最多重试 1 次；HTTP 429 和其他 4xx 不重试，缺少风险字段也不重复请求。节点检测默认并发 10 个，可通过运行设置 `FILTER_CONCURRENCY` 调整；同一节点的已启用情报站点并发查询。
 
-Net.Coffee 使用其网页查询接口 `https://ip.net.coffee/api/ip/lookup/{ip}`，无需 Key。原始信任分 `trust_score`（越高越可信）保留在证据摘要中，按 `100 - trust_score` 转为项目风险分。该接口尚无公开 API 文档或额度承诺，可能变更；已有配置可在“API 站点”页添加 `netcoffee` 类型的站点。
+Net.Coffee 是主信息源，使用其网页查询接口 `https://ip.net.coffee/api/ip/lookup/{ip}`，无需 Key。网络分类、风险标签、风险分、国家和 ASN 组织优先采用其有效数据；缺失的维度由其他启用来源补充，主来源不可用时回退到原有聚合逻辑，所有来源证据仍保留。`isResidential` 和 `is_mobile` 用于识别家宽和移动网络，AI 判断保留在证据摘要中。原始信任分 `trust_score`（越高越可信）按 `100 - trust_score` 转为项目风险分。该接口尚无公开 API 文档或额度承诺，可能变更；已有配置可在“API 站点”页添加 `netcoffee` 类型的站点。
+
+新配置默认禁用 ipwho.is、ipapi.is、Scamalytics 和 Abstract API；已有配置保持原值，可在“API 站点”页调整。节点详情按当前启用状态显示来源列和证据，历史结果也会隐藏已禁用的来源。更新后的解析逻辑会使旧探测缓存失效，已有检测结果需重新刷新才会采用新画像。
 
 ## CLI 使用
 

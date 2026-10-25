@@ -23,13 +23,13 @@ from settings import settings
 
 
 DEFAULT_API_SITES = [
-    {"id": "ipwhois", "column_name": "ipwho.is", "provider": "ipwhois", "url_template": "https://ipwho.is/{ip}", "api_key": "", "weight": 1.0, "enabled": True, "order": 0},
-    {"id": "ipapi", "column_name": "ipapi.is", "provider": "ipapi", "url_template": "https://api.ipapi.is?q={ip}", "api_key": "", "weight": 1.0, "enabled": True, "order": 1},
-    {"id": "scamalytics", "column_name": "Scamalytics", "provider": "scamalytics", "url_template": "https://api11.scamalytics.com/v3/{ip}?key={key}", "api_key": "", "weight": 1.0, "enabled": False, "order": 2},
-    {"id": "proxycheck", "column_name": "proxycheck.io", "provider": "proxycheck", "url_template": "https://proxycheck.io/v3/{ip}", "api_key": "", "weight": 1.3, "enabled": True, "order": 3},
-    {"id": "abstract", "column_name": "Abstract API", "provider": "abstract", "url_template": "https://ip-intelligence.abstractapi.com/v1/?api_key={key}&ip_address={ip}", "api_key": "", "weight": 0.8, "enabled": False, "order": 4},
-    {"id": "ip2location", "column_name": "IP2Location.io", "provider": "ip2location", "url_template": "https://api.ip2location.io/?ip={ip}&format=json", "api_key": "", "weight": 0.6, "enabled": True, "order": 5},
-    {"id": "netcoffee", "column_name": "Net.Coffee", "provider": "netcoffee", "url_template": "https://ip.net.coffee/api/ip/lookup/{ip}", "api_key": "", "weight": 1.0, "enabled": True, "order": 6},
+    {"id": "netcoffee", "column_name": "Net.Coffee", "provider": "netcoffee", "url_template": "https://ip.net.coffee/api/ip/lookup/{ip}", "api_key": "", "weight": 1.0, "enabled": True, "order": 0},
+    {"id": "ipwhois", "column_name": "ipwho.is", "provider": "ipwhois", "url_template": "https://ipwho.is/{ip}", "api_key": "", "weight": 1.0, "enabled": False, "order": 1},
+    {"id": "ipapi", "column_name": "ipapi.is", "provider": "ipapi", "url_template": "https://api.ipapi.is?q={ip}", "api_key": "", "weight": 1.0, "enabled": False, "order": 2},
+    {"id": "scamalytics", "column_name": "Scamalytics", "provider": "scamalytics", "url_template": "https://api11.scamalytics.com/v3/{ip}?key={key}", "api_key": "", "weight": 1.0, "enabled": False, "order": 3},
+    {"id": "proxycheck", "column_name": "proxycheck.io", "provider": "proxycheck", "url_template": "https://proxycheck.io/v3/{ip}", "api_key": "", "weight": 1.3, "enabled": True, "order": 4},
+    {"id": "abstract", "column_name": "Abstract API", "provider": "abstract", "url_template": "https://ip-intelligence.abstractapi.com/v1/?api_key={key}&ip_address={ip}", "api_key": "", "weight": 0.8, "enabled": False, "order": 5},
+    {"id": "ip2location", "column_name": "IP2Location.io", "provider": "ip2location", "url_template": "https://api.ip2location.io/?ip={ip}&format=json", "api_key": "", "weight": 0.6, "enabled": True, "order": 6},
 ]
 
 

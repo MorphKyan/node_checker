@@ -7,6 +7,15 @@ from module_profile import ProfileAdapters, NodeProfileAggregator
 
 
 class ProfileAdapterTests(unittest.TestCase):
+    def test_netcoffee_direct_network_flags_and_ai_summary(self):
+        for flag, label in (("isResidential", "residential"), ("is_mobile", "mobile")):
+            with self.subTest(flag=flag):
+                verdict = ProfileAdapters.from_netcoffee({flag: True, "trust_score": 90,
+                    "company_type": "isp", "ai_verdict": {"label": "家宽", "reasoning": "network evidence"}})
+                self.assertEqual([item.label for item in verdict.network_labels], [label])
+                self.assertIn("network evidence", verdict.raw_summary)
+        self.assertEqual(ProfileAdapters.from_netcoffee({"success": False, "trust_score": 100}).status, "no_data")
+
     def test_netcoffee_converts_trust_and_keeps_network_flags(self):
         verdict = ProfileAdapters.from_netcoffee({
             "trust_score": 72, "company_type": "hosting", "is_datacenter": True,
@@ -128,6 +137,24 @@ class ProfileAdapterTests(unittest.TestCase):
 
 
 class NodeProfileAggregatorTests(unittest.TestCase):
+    def test_primary_overrides_conflicting_secondary_but_keeps_evidence(self):
+        primary = ProfileAdapters.from_netcoffee({"isResidential": True, "trust_score": 95,
+            "is_proxy": False, "is_vpn": False, "is_tor": False, "is_abuser": False})
+        secondary = ProfileAdapters.from_ipapi({"is_datacenter": True, "is_proxy": True})
+        profile = NodeProfileAggregator.aggregate([secondary, primary], primary=primary)
+        self.assertEqual(profile.risk_score, 5)
+        self.assertEqual([item.label for item in profile.network_labels], ["residential"])
+        self.assertEqual([item.label for item in profile.risk_labels], ["clean"])
+        self.assertEqual(len(profile.evidence), 2)
+
+    def test_partial_primary_uses_secondary_for_missing_dimensions(self):
+        primary = ProfileAdapters.from_netcoffee({"trust_score": 95})
+        secondary = ProfileAdapters.from_ipapi({"is_datacenter": True, "is_proxy": True})
+        profile = NodeProfileAggregator.aggregate([secondary, primary], primary=primary)
+        self.assertEqual(profile.risk_score, 5)
+        self.assertEqual([item.label for item in profile.network_labels], ["datacenter"])
+        self.assertEqual([item.label for item in profile.risk_labels], ["proxy"])
+
     def test_datacenter_vpn_compound_label(self):
         profile = NodeProfileAggregator.aggregate([
             ProfileAdapters.from_ipapi({

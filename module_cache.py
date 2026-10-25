@@ -26,7 +26,7 @@ class ProbeCache:
     @classmethod
     def config_signature(cls, api_sites=None, *, probe_config=None) -> str:
         snapshot = cls.probe_config_snapshot(probe_config, api_sites)
-        payload = {"version": 4, "core": settings.PROXY_CORE, "target": settings.TTFB_TARGET_URL, "times": settings.PROBE_TEST_TIMES, "ttfb_timeout": settings.TTFB_TIMEOUT, "api_timeout": settings.API_TIMEOUT, "exit_ip_endpoint": snapshot["exit_ip_endpoint"], "sites": snapshot["api_sites"]}
+        payload = {"version": 5, "core": settings.PROXY_CORE, "target": settings.TTFB_TARGET_URL, "times": settings.PROBE_TEST_TIMES, "ttfb_timeout": settings.TTFB_TIMEOUT, "api_timeout": settings.API_TIMEOUT, "exit_ip_endpoint": snapshot["exit_ip_endpoint"], "sites": snapshot["api_sites"]}
         # Keys must influence invalidation but never appear in paths or logs.
         return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:20]
 

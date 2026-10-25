@@ -123,9 +123,13 @@ class LightweightProbe:
         )
         verdicts = [LightweightProbe._verdict_for_site(site, data, status, actual_ip) for site, (data, status) in zip(sites, responses)]
         weights = {site["id"]: float(site.get("weight", 1)) for site in sites}
-        profile = NodeProfileAggregator.aggregate(verdicts, weights)
+        primary = next((verdict for site, verdict in zip(sites, verdicts)
+                        if site["provider"] == "netcoffee" and (verdict.status == "success" or verdict.network_labels)), None)
+        profile = NodeProfileAggregator.aggregate(verdicts, weights, primary=primary)
         geo, asn = "Unknown", ""
-        for data in [exit_data] + [data for data, status in responses if status == "success"]:
+        primary_data = [data for site, (data, status) in zip(sites, responses)
+                        if site["provider"] == "netcoffee" and status == "success"]
+        for data in primary_data + [exit_data] + [data for data, status in responses if status == "success"]:
             if not isinstance(data, dict) or data.get("error") or data.get("success") is False:
                 continue
             country = data.get("country_code") or data.get("countryCode") or data.get("country")

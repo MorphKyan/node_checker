@@ -56,7 +56,7 @@ class JsonRefactorTests(unittest.TestCase):
         ApiStore.update_job(job["id"], status="running", phase="filter")
         self.assertTrue(ApiStore.save_results_if_current(sub["id"], job["id"], sub["url"], [node(12)]))
         result = ApiStore.get_latest_result(sub["id"])
-        self.assertEqual(result["api_sites_snapshot"][0]["id"], "ipwhois")
+        self.assertEqual(result["api_sites_snapshot"][0]["id"], "netcoffee")
         self.assertNotIn("api_key", result["api_sites_snapshot"][0])
 
     def test_netcoffee_can_be_registered_without_key(self):

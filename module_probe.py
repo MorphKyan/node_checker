@@ -10,6 +10,7 @@ from aiohttp_socks import ProxyConnector
 
 from models import ApiVerdict, NodeProfile, ProbeData, ProxyNode
 from module_profile import NodeProfileAggregator, ProfileAdapters
+from module_route import EntranceRouteProbe
 from settings import settings
 
 
@@ -31,18 +32,19 @@ class LightweightProbe:
 
     @staticmethod
     async def test_ttfb(socks5_url: str, target_url: str, times: int | None = None) -> float:
-        values = []
         for _ in range(times or settings.PROBE_TEST_TIMES):
             started = time.perf_counter()
             try:
                 connector = ProxyConnector.from_url(socks5_url, rdns=True)
                 async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.get(target_url, timeout=settings.TTFB_TIMEOUT) as response:
+                        if not 200 <= response.status < 400:
+                            continue
                         await response.content.read(1)
-                        values.append((time.perf_counter() - started) * 1000)
+                        return (time.perf_counter() - started) * 1000
             except Exception:
                 pass
-        return sum(values) / len(values) if values else 9999.0
+        return 9999.0
 
     @staticmethod
     async def detect_ipv6(socks5_url: str) -> tuple[bool, str]:
@@ -152,25 +154,30 @@ class LightweightProbe:
         api_sites: list[dict] | None = None,
         *,
         probe_config: dict | None = None,
+        route_probe: EntranceRouteProbe | None = None,
     ) -> ProbeData:
         from module_api_store import ApiStore
 
         probe_config = ApiStore.get_probe_config_snapshot(probe_config, api_sites)
-        tcp, ttfb, ipv6, intelligence = await asyncio.gather(
+        # A TCP listener alone cannot prove the proxy works (and some protocols use UDP).
+        ttfb = await LightweightProbe.test_ttfb(socks5_url, settings.TTFB_TARGET_URL, times=2)
+        if ttfb >= 9999.0:
+            return ProbeData(9999.0, 9999.0, "", "Unknown", "")
+        tcp, ipv6, intelligence, route = await asyncio.gather(
             LightweightProbe.tcp_ping(node.server_ip, node.server_port),
-            LightweightProbe.test_ttfb(socks5_url, settings.TTFB_TARGET_URL),
             LightweightProbe.detect_ipv6(socks5_url),
             LightweightProbe._ip_intelligence(socks5_url, probe_config),
+            (route_probe or EntranceRouteProbe()).probe(node.server_ip),
             return_exceptions=True,
         )
         if isinstance(tcp, BaseException): tcp = 9999.0
-        if isinstance(ttfb, BaseException): ttfb = 9999.0
         if isinstance(ipv6, BaseException): ipv6 = (False, "")
         if isinstance(intelligence, BaseException): intelligence = ("", "Unknown", "", NodeProfile())
+        if isinstance(route, BaseException): route = {"route_status": "failed"}
         actual_ip, geo, asn, profile = intelligence
         return ProbeData(
             tcp_ping_ms=tcp, ttfb_ms=ttfb, actual_ip=actual_ip,
             actual_geo=geo, asn_org=asn,
-            # shortcut: route measurement is not implemented; keep unknown defaults until it is.
             profile=profile, ipv6_support=ipv6[0], actual_ipv6=ipv6[1],
+            **route,
         )

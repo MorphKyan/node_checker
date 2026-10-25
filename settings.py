@@ -17,13 +17,16 @@ class Config:
     FILTER_CONCURRENCY = 10
     SPEEDTEST_CONCURRENCY = 2
     
-    PROBE_TEST_TIMES = 3  # ping和TTFB测试次数
+    PROBE_TEST_TIMES = 3  # TCP ping次数；HTTP验活成功即停，最多尝试两次
     
     TUNNEL_START_DELAY = 1.5  # 启动代理内核后的等待时间(秒)
 
     TCP_PING_TIMEOUT = 3.0
     TTFB_TIMEOUT = 5.0
     API_TIMEOUT = 3.0
+    ROUTE_TIMEOUT = 20.0
+    ROUTE_MAX_HOPS = 30
+    ROUTE_HOP_TIMEOUT = 0.5
     SPEEDTEST_TIMEOUT = 10.0
     SUBSCRIPTION_MAX_M = 2
     SPEEDTEST_MAX_M = 10

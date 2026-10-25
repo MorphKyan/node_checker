@@ -1078,12 +1078,22 @@ export function NodeDrawer({ node, sites, onClose }: { node: NodeResult; sites?:
               <Detail label="归属国家/地区 (Geo)" value={node.probe.actual_geo} />
               <Detail label="ASN" value={node.probe.asn_org} />
               <Detail label="拒绝原因" value={node.reject_reason || "-"} />
-              <Detail label="骨干网" value={node.probe.backbone_info || "-"} />
+              <Detail label="入口路径观测到的网络" value={node.probe.backbone_info || "未知"} />
               <Detail label="绕路状态" value={node.probe.is_detour === null ? "未知" : node.probe.is_detour ? "Yes" : "No"} />
               <Detail label="判定置信度" value={node.probe.confidence} />
               <Detail label="TCP 延迟" value={`${node.probe.tcp_ping_ms} ms`} />
               <Detail label="HTTP TTFB" value={`${node.probe.ttfb_ms} ms`} />
             </div>
+          </Panel>
+
+          <Panel>
+            <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">到节点入口的路径</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              <Detail label="采样入口 IP" value={node.probe.route_target || "-"} />
+              <Detail label="探测状态" value={({ completed: "已到达入口", partial: "部分路径", timeout: "超时（保留已观测路径）", missing_tool: "缺少路由探测工具", dns_failed: "入口解析失败", failed: "探测失败", not_measured: "未检测" } as Record<string, string>)[node.probe.route_status || "not_measured"] || "未知"} />
+            </div>
+            <p className="mt-2 text-xs text-slate-500">服务运行主机到采样入口 IP 的系统路由观测；不代表中转、出口或回程，也不保证隧道使用同一 IP 或路径。未命中网络规则仍为未知。</p>
+            {node.probe.trace_path && <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-600">{node.probe.trace_path}</pre>}
           </Panel>
 
           <Panel>

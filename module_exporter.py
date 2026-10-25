@@ -133,8 +133,13 @@ class ResultExporter:
 - **Is Valid**: `{an.is_valid}`
 - **Reject Reason**: `{an.reject_reason or "None"}`
 
-## 4. Route Trace
-- **Trace Path**: `{probe.trace_path}`
+## 4. Route to Sampled Entrance (not transit, exit, or return path)
+- **Sampled Entrance IP**: `{probe.route_target or "Unknown"}`
+- **Trace Status**: `{probe.route_status}`
+- **Trace Path**:
+```text
+{probe.trace_path or "Not measured"}
+```
 - **Is Detour**: `{"Unknown" if probe.is_detour is None else "Yes" if probe.is_detour else "No"}`
 - **Is Backbone**: `{"Unknown" if probe.is_backbone is None else "Yes" if probe.is_backbone else "No"}`
 - **Backbone Info**: `{probe.backbone_info}`

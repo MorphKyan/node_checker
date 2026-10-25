@@ -35,7 +35,8 @@ The service should be treated as a "subscription relay + node profiling + qualit
 - `module_setup.py`: Environment preparation for local `sing-box.exe`.
 - `module_parser.py`: Subscription fetch/decode logic and multi-protocol URI parsing.
 - `module_tunnel.py`: Temporary `sing-box` process lifecycle and per-node tunnel config handling.
-- `module_probe.py`: TCP ping, TTFB, exit IP lookup, IP intelligence API calls, and profile aggregation input; route fields are reserved for future measurement.
+- `module_probe.py`: HTTP connectivity gate, then TCP ping, IPv6, exit IP lookup, IP intelligence API calls, and entrance route measurement.
+- `module_route.py`: Bounded system traceroute to a sampled entrance IP, RIPEstat ASN evidence, and known backbone network hints; shared per refresh.
 - `module_profile.py`: Normalizes IP intelligence responses into network labels, risk labels, risk scores, confidence, and evidence.
 - `module_analyzer.py`: Validity checks based solely on successful TTFB.
 - `module_speedtest.py`: Top-N download speed test for selected valid nodes.

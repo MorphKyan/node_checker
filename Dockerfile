@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     tar \
+    traceroute \
     unzip \
     && curl -fLo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz \
     && tar -xzf sing-box.tar.gz --strip-components=1 -C /usr/local/bin/ sing-box-1.14.3-linux-amd64/sing-box \

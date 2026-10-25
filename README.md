@@ -41,7 +41,7 @@ SG
 - SS 支持 SIP002（Base64URL 或明文转义凭据）、旧版整段 Base64、IPv6 和 SS2022；可通过 Xray / sing-box 检测，并导出增强 URI、sing-box 配置。SIP003 插件参数保留并传给 sing-box，Xray 遇到插件会明确拒绝。
 - VLESS 的 TCP、WebSocket、gRPC 可用于两种内核；XHTTP 使用 Xray 检测，导出为 sing-box 配置时会返回 422，不会静默转换为 TCP。
 - Hysteria2 的混淆、上下行带宽和 `ports` 端口跳跃参数由 sing-box 保留；Xray 检测遇到这些参数会明确拒绝，请选用 sing-box。
-- 检测 TCP Ping、TTFB、出口 IP、实际地区、ASN、绕路和骨干网信息。
+- 检测 TCP Ping、TTFB、出口 IP、实际地区、ASN，以及到节点入口的路径和骨干网络线索；绕路判断暂未实现。
 - 查询 IP 情报并生成节点画像，包括网络分类、类型分类、风险分和证据。
 - 节点是否有效仅由 TTFB 决定；IP 情报 API 只提供画像与风险证据。
 - 普通刷新默认不测速；测速刷新显式指定每区域 Top-N。
@@ -353,6 +353,9 @@ GET /subscriptions/{subscription_id}/results
         "is_detour": null,
         "is_backbone": null,
         "backbone_info": "",
+        "route_target": "",
+        "route_status": "not_measured",
+        "trace_path": "",
         "evidence": ["ipwho.is: hosting=true"]
       }
     }
@@ -494,7 +497,11 @@ python -m unittest discover -s tests
 ## 运行注意事项
 
 - 检测会启动 `sing-box` 子进程，并在完成后清理。
-- 刷新检测会访问订阅 URL、IP 情报 API 和测速 URL；当前尚未测量路由，绕路与骨干网状态为 `null`（未知）。
+- 刷新先查询缓存（强制探测绕过缓存），未命中时启动代理内核，先通过代理访问 `TTFB_TARGET_URL` 验活；收到 2xx/3xx 响应并读到首字节或响应结束即成功，失败最多尝试两次。失败节点跳过其余采集和测速。TTFB 记录首次成功的耗时，不再取三次平均；此结果只代表该检测目标的可达性。
+- 验活成功后并行采集 TCP Ping、IPv6、IP 情报和入口路径；启用测速时仍按“有效节点粗测 → 每区域 Top-N 精测”执行。
+- 入口路径使用 Windows 自带 `tracert` 或 Linux `traceroute`（Docker 镜像已安装），系统命令最多运行 20 秒、最多 30 跳，超时保留已返回的路径；同一次刷新内相同采样入口共用探测，最多并发两个路由命令。
+- 逐跳公网 IP 通过 RIPEstat `network-info` 查询 ASN（每请求默认 3 秒，最多并发四个，同次刷新复用）；只发送已观测到的公网路由 IP，不发送订阅或节点凭据。已知 ASN 规则覆盖电信 163/CN2、联通 169/9929/国际、移动/CMI/CMIN2、NTT、Cogent。没有 ASN 时，对 APNIC 登记为 CN2-BB 的 `59.43.0.0/16` 补充 IP 段依据，不推造 ASN。命中中间跳时 `is_backbone=true`，否则为 `null`（未知）；不区分 CN2 GIA/GT 等商业产品。绕路字段仍为 `null`。
+- 路径仅代表服务运行主机到单个采样入口 IP 的系统路由观测（Windows ICMP、Linux UDP）；不代表中转链路、出口或回程。域名可能解析到多个 IP，代理内核也可能选用不同 IP/协议路径；ICMP/UDP 被过滤或 ASN 服务不可达时保留未知，不据此判节点失效。
 - 出口 IP 查询失败时保留未知，情报缺失不视为 Clean；情报异常不会覆盖已测得的 TTFB。旧版情报结果需重新刷新后更新。
 - 过滤与测速并发限制由同一后端进程的所有刷新任务共享。
 - 默认普通刷新不测速；测速刷新由用户输入每区域数量，并可选择强制探测。

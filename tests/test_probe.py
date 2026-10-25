@@ -8,6 +8,57 @@ from settings import settings
 
 
 class LightweightProbeTests(unittest.TestCase):
+    def setUp(self):
+        route = patch("module_probe.EntranceRouteProbe.probe", new=AsyncMock(return_value={}))
+        self.route = route.start()
+        self.addCleanup(route.stop)
+
+    def test_failed_connectivity_skips_all_other_probes(self):
+        async def run_case():
+            node = VlessNode("vless://uuid@example.test:443", "example.test", 443, "n", "JP", uuid="uuid")
+            with patch.object(LightweightProbe, "test_ttfb", new=AsyncMock(return_value=9999.0)) as ttfb, \
+                 patch.object(LightweightProbe, "tcp_ping", new=AsyncMock()) as tcp, \
+                 patch.object(LightweightProbe, "detect_ipv6", new=AsyncMock()) as ipv6, \
+                 patch.object(LightweightProbe, "_ip_intelligence", new=AsyncMock()) as intelligence:
+                probe = await LightweightProbe.run_probe(node, "socks5://unused", api_sites=[])
+            self.assertEqual(probe.ttfb_ms, 9999.0)
+            self.assertEqual(probe.route_status, "not_measured")
+            ttfb.assert_awaited_once_with("socks5://unused", settings.TTFB_TARGET_URL, times=2)
+            for other in (tcp, ipv6, intelligence, self.route):
+                other.assert_not_awaited()
+        asyncio.run(run_case())
+
+    def test_ttfb_retries_errors_and_stops_at_first_http_success(self):
+        async def run_case():
+            for statuses, attempts, success in [([503, 204], 2, True), ([200, 503], 1, True), ([403, 500], 2, False)]:
+                responses = []
+                for status in statuses:
+                    response = MagicMock(status=status)
+                    response.content.read = AsyncMock(return_value=b"")
+                    responses.append(response)
+                session = MagicMock()
+                session.get.return_value.__aenter__.side_effect = responses
+                with patch("module_probe.ProxyConnector.from_url"), patch("module_probe.aiohttp.ClientSession") as client:
+                    client.return_value.__aenter__.return_value = session
+                    result = await LightweightProbe.test_ttfb("socks5://unused", "https://target.test", times=2)
+                self.assertEqual(session.get.call_count, attempts)
+                self.assertEqual(result < 9999.0, success)
+        asyncio.run(run_case())
+
+    def test_route_failure_does_not_invalidate_working_proxy(self):
+        async def run_case():
+            node = VlessNode("vless://uuid@example.test:443", "example.test", 443, "n", "JP", uuid="uuid")
+            self.route.side_effect = RuntimeError("route unavailable")
+            with patch.object(LightweightProbe, "test_ttfb", new=AsyncMock(return_value=100.0)), \
+                 patch.object(LightweightProbe, "tcp_ping", new=AsyncMock(return_value=9999.0)), \
+                 patch.object(LightweightProbe, "detect_ipv6", new=AsyncMock(return_value=(False, ""))), \
+                 patch.object(LightweightProbe, "_ip_intelligence", new=AsyncMock(side_effect=OSError("api down"))):
+                result = await LightweightProbe.run_probe(node, "socks5://unused", api_sites=[])
+            self.assertEqual(result.ttfb_ms, 100.0)
+            self.assertEqual(result.route_status, "failed")
+            self.assertIsNone(result.is_backbone)
+        asyncio.run(run_case())
+
     def test_netcoffee_is_primary_regardless_of_site_order_and_falls_back_on_failure(self):
         async def run_case():
             sites = [{"id": "secondary", "provider": "ipapi", "enabled": True},

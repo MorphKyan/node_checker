@@ -10,6 +10,7 @@ from module_api_store import ApiStore
 from module_cache import ProbeCache
 from module_parser import NodeParser
 from module_probe import LightweightProbe
+from module_route import EntranceRouteProbe
 from module_setup import setup_core
 from module_tunnel import TunnelController
 from settings import settings
@@ -100,6 +101,7 @@ class SubscriptionRefreshService:
         force_probe: bool = False,
         api_sites: list[dict] | None = None,
         probe_config: dict | None = None,
+        route_probe: EntranceRouteProbe | None = None,
     ) -> AnalyzedNode:
         # Direct callers must get the same immutable per-node snapshot as
         # run_nodes; otherwise cache lookup and the ensuing probe can observe
@@ -123,7 +125,7 @@ class SubscriptionRefreshService:
                 local_port = get_free_local_port()
                 process, config_path = await TunnelController.start_tunnel(node, local_port)
                 socks5_url = f"socks5://127.0.0.1:{local_port}"
-                probe_data = await LightweightProbe.run_probe(node, socks5_url, probe_config=probe_config)
+                probe_data = await LightweightProbe.run_probe(node, socks5_url, probe_config=probe_config, route_probe=route_probe)
                 try:
                     await ProbeCache.set(node, probe_data, probe_config=probe_config, expected_signature=signature)
                 except OSError as e:
@@ -167,10 +169,11 @@ class SubscriptionRefreshService:
         # Freeze once for every caller (including CLI) before cache/probe work.
         probe_config = ApiStore.get_probe_config_snapshot(probe_config, api_sites)
         processed = 0
+        route_probe = EntranceRouteProbe()
 
         async def filter_with_progress(node: ProxyNode) -> AnalyzedNode:
             nonlocal processed
-            result = await cls.process_node_filter(node, cls.limit("FILTER_CONCURRENCY"), force_probe=force_probe, probe_config=probe_config)
+            result = await cls.process_node_filter(node, cls.limit("FILTER_CONCURRENCY"), force_probe=force_probe, probe_config=probe_config, route_probe=route_probe)
             processed += 1
             if progress_callback:
                 progress_callback("filter", processed, len(nodes))

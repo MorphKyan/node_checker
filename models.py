@@ -84,6 +84,8 @@ class ProbeData:
     profile: NodeProfile = field(default_factory=NodeProfile)
     ipv6_support: bool = False
     actual_ipv6: str = ""
+    route_target: str = ""
+    route_status: str = "not_measured"
 
 @dataclass
 class AnalyzedNode:

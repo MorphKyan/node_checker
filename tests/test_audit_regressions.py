@@ -178,6 +178,9 @@ class AsyncAuditRegressionTests(unittest.IsolatedAsyncioTestCase):
                 (singbox if core == "xray" else xray).assert_not_called()
 
     async def test_exit_failure_and_bad_metadata_do_not_erase_ttfb(self):
+        route = patch("module_probe.EntranceRouteProbe.probe", new=AsyncMock(return_value={}))
+        route.start()
+        self.addCleanup(route.stop)
         node = tested_node().analyzed_node.node
         site = {"id": "ipapi", "provider": "ipapi", "enabled": True}
         for exit_value, response, expected in [

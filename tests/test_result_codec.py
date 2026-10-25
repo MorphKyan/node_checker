@@ -33,6 +33,16 @@ def make_node() -> TestedNode:
 
 
 class ResultCodecTests(unittest.TestCase):
+    def test_entrance_route_evidence_survives_storage(self):
+        data = asdict(make_node().analyzed_node.probe)
+        data.update(route_target="1.1.1.1", route_status="completed", trace_path="1: 59.43.1.1 [AS4809 电信 CN2]",
+                    is_backbone=True, backbone_info="电信 CN2 (AS4809)")
+        restored = restore_probe_data(json.loads(json.dumps(data)))
+        self.assertEqual(restored.route_target, "1.1.1.1")
+        self.assertEqual(restored.route_status, "completed")
+        self.assertTrue(restored.is_backbone)
+        self.assertEqual(restored.trace_path, data["trace_path"])
+
     def test_unmeasured_legacy_routes_are_unknown(self):
         data = asdict(make_node().analyzed_node.probe)
         data.update(is_detour=False, is_backbone=False)

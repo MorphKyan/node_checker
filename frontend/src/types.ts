@@ -58,6 +58,9 @@ export interface NodeProbe {
   is_detour: boolean | null;
   is_backbone: boolean | null;
   backbone_info: string;
+  route_target?: string;
+  route_status?: string;
+  trace_path?: string;
   evidence: ApiVerdict[];
 }
 

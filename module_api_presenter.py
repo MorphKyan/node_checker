@@ -101,6 +101,9 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                     "is_detour": probe.is_detour,
                     "is_backbone": probe.is_backbone,
                     "backbone_info": probe.backbone_info,
+                    "route_target": probe.route_target,
+                    "route_status": probe.route_status,
+                    "trace_path": probe.trace_path,
                     "evidence": [
                         {
                             "source": verdict.source,

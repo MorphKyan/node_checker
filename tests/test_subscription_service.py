@@ -76,7 +76,7 @@ class SubscriptionRefreshServiceTests(unittest.TestCase):
             active = 0
             max_active = 0
 
-            async def fake_filter(node, sem, force_probe=False, api_sites=None, probe_config=None):
+            async def fake_filter(node, sem, force_probe=False, api_sites=None, probe_config=None, route_probe=None):
                 return make_analyzed_node(node)
 
             async def fake_speed_test(analyzed_node, *, precise=False):

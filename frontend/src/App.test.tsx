@@ -300,7 +300,12 @@ describe("App", () => {
     expect(cells.slice(8, -1)).toEqual([...(disabledIds.includes("one") ? [] : ["-风险 12"]), ...(disabledIds.includes("two") ? [] : ["timeout"])]);
     expect(cells).toHaveLength(headers.length);
     cleanup();
+    node.probe.route_target = "1.1.1.1";
+    node.probe.route_status = "partial";
+    node.probe.trace_path = "1: 59.43.1.1 [AS4809 电信 CN2]";
     render(<NodeDrawer node={node} sites={sites} onClose={() => {}} />);
+    expect(screen.getByText("部分路径")).toBeInTheDocument();
+    expect(screen.getByText("1: 59.43.1.1 [AS4809 电信 CN2]")).toBeInTheDocument();
     for (const site of sites) {
       expect(Boolean(screen.queryByText(site.column_name))).toBe(site.enabled);
     }

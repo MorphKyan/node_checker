@@ -1,6 +1,7 @@
 import asyncio
 import os
 import socket
+import time
 from contextlib import asynccontextmanager
 
 from models import AnalyzedNode, ProbeData, TestedNode, ProxyNode
@@ -9,7 +10,7 @@ from module_api_store import ApiStore
 from module_cache import ProbeCache
 from module_parser import NodeParser
 from module_probe import LightweightProbe
-from module_setup import setup_singbox, setup_xray
+from module_setup import setup_core
 from module_tunnel import TunnelController
 from settings import settings
 
@@ -103,7 +104,7 @@ class SubscriptionRefreshService:
         # Direct callers must get the same immutable per-node snapshot as
         # run_nodes; otherwise cache lookup and the ensuing probe can observe
         # different site configurations.
-        probe_config = ProbeCache.probe_config_snapshot(probe_config, api_sites)
+        probe_config = ApiStore.get_probe_config_snapshot(probe_config, api_sites)
         async with sem:
             signature = ProbeCache.config_signature(probe_config=probe_config)
             process = None
@@ -164,7 +165,7 @@ class SubscriptionRefreshService:
         probe_config: dict | None = None,
     ) -> list[TestedNode]:
         # Freeze once for every caller (including CLI) before cache/probe work.
-        probe_config = ProbeCache.probe_config_snapshot(probe_config, api_sites)
+        probe_config = ApiStore.get_probe_config_snapshot(probe_config, api_sites)
         processed = 0
 
         async def filter_with_progress(node: ProxyNode) -> AnalyzedNode:
@@ -214,7 +215,7 @@ class SubscriptionRefreshService:
         speedtest_limit: int,
         force_probe: bool = False,
     ) -> list[TestedNode]:
-        await asyncio.to_thread(setup_xray if settings.PROXY_CORE == "xray" else setup_singbox)
+        await asyncio.to_thread(setup_core)
         subscription = ApiStore.get_subscription(subscription_id)
         if not subscription:
             raise ValueError(f"Subscription not found: {subscription_id}")
@@ -224,13 +225,13 @@ class SubscriptionRefreshService:
             job_id,
             status="running",
             phase="fetch",
-            started_at=ApiStore.now(),
+            started_at=int(time.time()),
         )
 
         raw_text = await cls.fetch_subscription_text(subscription["url"])
         nodes = NodeParser.parse_nodes(raw_text)
         if not nodes:
-            raise ValueError("No valid VLESS nodes found in subscription")
+            raise ValueError("No valid proxy nodes found in subscription")
 
         ApiStore.update_job(job_id, phase="filter", total_nodes=len(nodes), processed_nodes=0)
 
@@ -287,7 +288,7 @@ class SubscriptionRefreshService:
                 status="failed",
                 phase="failed",
                 error=str(e),
-                finished_at=ApiStore.now(),
+                finished_at=int(time.time()),
             )
         finally:
             cls._running_tasks.pop(job_id, None)
@@ -326,7 +327,7 @@ class SubscriptionRefreshService:
                 status="failed",
                 phase="failed",
                 error=f"Unable to schedule refresh task: {e}",
-                finished_at=ApiStore.now(),
+                finished_at=int(time.time()),
             )
             return ApiStore.get_job(job["id"])
         return job

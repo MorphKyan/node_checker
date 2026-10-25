@@ -1,6 +1,6 @@
-# Vless Node Checker
+# Node Checker
 
-Vless Node Checker 是一个本地代理节点检测与订阅增强工具，支持 VLESS、Hysteria2 和 Shadowsocks。它可以解析订阅链接或本地订阅文件，启动 `sing-box` 或 `Xray` 隧道检测节点连通性，查询可配置的 IP 情报 API，生成节点画像，并输出 Markdown 报告、增强订阅文件和本地 FastAPI 后端服务。
+Node Checker 是一个支持多协议的本地节点分析网站与订阅增强工具，支持 VLESS、Hysteria2 和 Shadowsocks。它可以解析订阅链接或本地订阅文件，启动 `sing-box` 或 `Xray` 隧道检测节点连通性，查询可配置的 IP 情报 API，生成节点画像，并输出 Markdown 报告、增强订阅文件和本地 FastAPI 后端服务。
 
 增强订阅只重写原始 URI 的 `#remark` 节点名，不修改密码、加密方法、UUID、地址、端口、传输层、安全参数、SNI、path、host 等连接参数。
 
@@ -8,13 +8,13 @@ Vless Node Checker 是一个本地代理节点检测与订阅增强工具，支�
 
 这个项目适合作为一个本地优先的「订阅链接中转 + 节点画像增强 + 节点质量看板」服务。
 
-很多订阅源里的节点名只包含国家或简单序号，不方便判断节点到底是机房、托管、VPN、Proxy、Tor、滥用风险，还是疑似家庭宽带。Vless Node Checker 的目标是把原始订阅转换为一个更可读、更可筛选的新订阅链接，并保留完整检测结果供 Web 面板或 API 查询。
+很多订阅源里的节点名只包含国家或简单序号，不方便判断节点到底是机房、托管、VPN、Proxy、Tor、滥用风险，还是疑似家庭宽带。Node Checker 的目标是把原始订阅转换为一个更可读、更可筛选的新订阅链接，并保留完整检测结果供 Web 面板或 API 查询。
 
 推荐使用方式：
 
 ```text
 原始订阅 URL
-  -> Vless Node Checker 拉取和检测
+  -> Node Checker 拉取和检测
   -> 生成节点画像、风险证据和增强节点名
   -> 客户端订阅增强后的本地 URL
 ```
@@ -79,7 +79,7 @@ SG
 ```text
 订阅 URL 或本地文件
   -> 拉取订阅文本
-  -> 解析 VLESS URI
+  -> 解析多协议节点 URI
   -> 为每个节点启动临时 sing-box 隧道
   -> 检测 TCP Ping、TTFB、出口 IP、地区、ASN、路由
   -> 查询当前已启用的 IP 情报站点
@@ -162,9 +162,9 @@ result/subscriptions/enhanced_detailed_base64.txt
 
 - `report.md` 是节点总览表。
 - `result/node_details/` 包含每个节点的详细检测报告。
-- `enhanced_compact.txt` 是紧凑命名的明文 VLESS URI 列表。
+- `enhanced_compact.txt` 是紧凑命名的明文节点 URI 列表。
 - `enhanced_compact_base64.txt` 是紧凑命名的 base64 订阅。
-- `enhanced_detailed.txt` 是详细命名的明文 VLESS URI 列表。
+- `enhanced_detailed.txt` 是详细命名的明文节点 URI 列表。
 - `enhanced_detailed_base64.txt` 是详细命名的 base64 订阅。
 
 ## 增强订阅命名

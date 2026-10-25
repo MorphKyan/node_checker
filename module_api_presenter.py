@@ -6,6 +6,13 @@ from module_subscription_exporter import SubscriptionExporter
 from settings import settings
 
 
+def normalize_subscription(row: dict) -> dict:
+    return {key: row[key] for key in (
+        "id", "name", "url", "last_status", "node_count", "valid_count",
+        "updated_at", "last_job_id",
+    )}
+
+
 def normalize_job(row: dict) -> dict:
     return {
         "job_id": row["id"],
@@ -67,8 +74,8 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                 "enhanced_name_compact": compact_name,
                 "enhanced_name_detailed": detailed_name,
                 "raw_uri": node.raw_uri,
-                "compact_uri": SubscriptionExporter.rewrite_vless_remark(node.raw_uri, compact_name),
-                "detailed_uri": SubscriptionExporter.rewrite_vless_remark(node.raw_uri, detailed_name),
+                "compact_uri": SubscriptionExporter.rewrite_node_remark(node.raw_uri, compact_name),
+                "detailed_uri": SubscriptionExporter.rewrite_node_remark(node.raw_uri, detailed_name),
                 "is_valid": analyzed.is_valid,
                 "reject_reason": analyzed.reject_reason,
                 "download_speed_mbps": tested.download_speed_mbps,

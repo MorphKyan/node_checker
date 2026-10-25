@@ -32,6 +32,8 @@ DEFAULT_API_SITES = [
     {"id": "ip2location", "column_name": "IP2Location.io", "provider": "ip2location", "url_template": "https://api.ip2location.io/?ip={ip}&format=json", "api_key": "", "weight": 0.6, "enabled": True, "order": 6},
 ]
 
+API_PROVIDERS = ["ipwhois", "ipapi", "scamalytics", "proxycheck", "abstract", "ip2location", "netcoffee"]
+
 
 class ApiStore:
     _config_lock = threading.RLock()
@@ -39,50 +41,17 @@ class ApiStore:
     _result_locks: dict[str, threading.RLock] = {}
 
     @staticmethod
-    def now() -> int:
-        return int(time.time())
-
-    @staticmethod
-    def new_subscription_id() -> str:
-        return f"sub_{uuid.uuid4().hex[:12]}"
-
-    @staticmethod
-    def new_job_id() -> str:
-        return f"job_{uuid.uuid4().hex[:12]}"
-
-    @staticmethod
-    def new_template_id() -> str:
-        return f"tpl_{uuid.uuid4().hex[:12]}"
-
-    @classmethod
-    def data_dir(cls) -> Path:
-        return Path(settings.DATA_DIR)
-
-    @classmethod
-    def config_path(cls) -> Path:
-        return cls.data_dir() / "config.json"
-
-    @classmethod
-    def results_path(cls, subscription_id: str) -> Path:
-        return cls.data_dir() / "results" / f"{subscription_id}.json"
-
-    @classmethod
-    def jobs_path(cls, job_id: str) -> Path:
-        return cls.data_dir() / "jobs" / f"{job_id}.json"
-
-    @staticmethod
     def _atomic_write(path: Path, value: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        with open(temp, "w", encoding="utf-8") as f:
-            json.dump(value, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
         try:
+            with open(temp, "w", encoding="utf-8") as f:
+                json.dump(value, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(temp, path)
         finally:
-            # A failed replacement must leave the previous file intact and
-            # must not accumulate abandoned temporary configuration files.
+            # Clean up after serialization, flush, and replacement failures.
             temp.unlink(missing_ok=True)
 
     @staticmethod
@@ -105,47 +74,42 @@ class ApiStore:
         }
 
     @classmethod
-    def init_db(cls) -> None:
-        """Compatibility name retained for callers; no database is created."""
-        cls._config()
-
-    @classmethod
-    def _config(cls) -> dict[str, Any]:
+    def load_config(cls) -> dict[str, Any]:
         with cls._config_lock:
-            cls.data_dir().mkdir(parents=True, exist_ok=True)
+            Path(settings.DATA_DIR).mkdir(parents=True, exist_ok=True)
             try:
-                with cls.config_path().open(encoding="utf-8") as file:
+                with (Path(settings.DATA_DIR) / "config.json").open(encoding="utf-8") as file:
                     config = json.load(file)
             except FileNotFoundError:
                 config = cls._default_config()
-                cls._atomic_write(cls.config_path(), config)
+                cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
             if not isinstance(config, dict):
                 raise ValueError("config.json must contain a JSON object; file preserved")
             return {**cls._default_config(), **config}
 
     @classmethod
-    def _save_config(cls, config: dict[str, Any]) -> None:
-        cls._atomic_write(cls.config_path(), config)
-
-    @classmethod
     def get_runtime_settings(cls) -> dict[str, Any]:
-        return deepcopy(cls._config().get("runtime_settings", {}))
+        return deepcopy(cls.load_config().get("runtime_settings", {}))
 
     @classmethod
     def save_runtime_settings(cls, values: dict[str, Any]) -> None:
         with cls._config_lock:
-            config = cls._config()
+            config = cls.load_config()
             config["runtime_settings"] = deepcopy(values)
-            cls._save_config(config)
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
 
     @classmethod
     def get_exit_ip_endpoint(cls) -> str:
-        return str(cls._config().get("exit_ip_endpoint") or "https://ipwho.is/")
+        return str(cls.load_config().get("exit_ip_endpoint") or "https://ipwho.is/")
 
     @classmethod
-    def get_probe_config_snapshot(cls) -> dict[str, Any]:
+    def get_probe_config_snapshot(cls, probe_config=None, api_sites=None) -> dict[str, Any]:
         """Capture every persisted input used by a probe in one config read."""
-        config = cls._config()
+        if probe_config is not None:
+            return probe_config
+        if api_sites is not None:
+            return {"api_sites": api_sites, "exit_ip_endpoint": cls.get_exit_ip_endpoint()}
+        config = cls.load_config()
         sites = sorted(config.get("api_sites", []), key=lambda s: (s.get("order", 0), s.get("id", "")))
         return {
             "api_sites": deepcopy(sites),
@@ -157,7 +121,9 @@ class ApiStore:
         if not endpoint.startswith(("http://", "https://")):
             raise ValueError("exit_ip_endpoint must be an HTTP(S) URL")
         with cls._config_lock:
-            config = cls._config(); config["exit_ip_endpoint"] = endpoint; cls._save_config(config)
+            config = cls.load_config()
+            config["exit_ip_endpoint"] = endpoint
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
         return endpoint
 
     @classmethod
@@ -168,12 +134,8 @@ class ApiStore:
 
     @classmethod
     def get_api_sites(cls, *, public: bool = True) -> list[dict[str, Any]]:
-        sites = sorted(cls._config().get("api_sites", []), key=lambda s: (s.get("order", 0), s.get("id", "")))
+        sites = sorted(cls.load_config().get("api_sites", []), key=lambda s: (s.get("order", 0), s.get("id", "")))
         return [cls._public_site(s) if public else deepcopy(s) for s in sites]
-
-    @staticmethod
-    def provider_types() -> list[str]:
-        return ["ipwhois", "ipapi", "scamalytics", "proxycheck", "abstract", "ip2location", "netcoffee"]
 
     @classmethod
     def _validate_site(cls, data: dict[str, Any]) -> dict[str, Any]:
@@ -181,7 +143,7 @@ class ApiStore:
         site_id = str(site.get("id", "")).strip()
         if not site_id or not site_id.replace("_", "").replace("-", "").isalnum():
             raise ValueError("site id must contain only letters, digits, '-' or '_'")
-        if site.get("provider") not in cls.provider_types():
+        if site.get("provider") not in API_PROVIDERS:
             raise ValueError("unsupported provider")
         if not str(site.get("column_name", "")).strip():
             raise ValueError("column_name is required")
@@ -204,19 +166,21 @@ class ApiStore:
     @classmethod
     def create_api_site(cls, data: dict[str, Any]) -> dict[str, Any]:
         with cls._config_lock:
-            config = cls._config(); sites = config["api_sites"]
+            config = cls.load_config()
+            sites = config["api_sites"]
             if any(s.get("id") == data.get("id") for s in sites):
                 raise ValueError("site id already exists")
             site = cls._validate_site(data)
             site["order"] = len(sites)
             site["api_key"] = str(data.get("api_key") or "")
-            sites.append(site); cls._save_config(config)
+            sites.append(site)
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
             return cls._public_site(site)
 
     @classmethod
     def update_api_site(cls, site_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         with cls._config_lock:
-            config = cls._config()
+            config = cls.load_config()
             for index, old in enumerate(config["api_sites"]):
                 if old.get("id") != site_id: continue
                 if "id" in data and data["id"] != site_id:
@@ -230,82 +194,94 @@ class ApiStore:
                 elif "api_key" in data and data["api_key"]:
                     candidate["api_key"] = str(data["api_key"])
                 site = cls._validate_site(candidate)
-                config["api_sites"][index] = site; cls._save_config(config)
+                config["api_sites"][index] = site
+                cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
                 return cls._public_site(site)
         return None
 
     @classmethod
     def delete_api_site(cls, site_id: str) -> bool:
         with cls._config_lock:
-            config = cls._config(); sites = config["api_sites"]
+            config = cls.load_config()
+            sites = config["api_sites"]
             kept = [s for s in sites if s.get("id") != site_id]
             if len(kept) == len(sites): return False
             for index, site in enumerate(kept): site["order"] = index
-            config["api_sites"] = kept; cls._save_config(config); return True
+            config["api_sites"] = kept
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+            return True
 
     @classmethod
     def order_api_sites(cls, ordered_ids: list[str]) -> list[dict[str, Any]]:
         with cls._config_lock:
-            config = cls._config(); sites = config["api_sites"]
+            config = cls.load_config()
+            sites = config["api_sites"]
             ids = [s.get("id") for s in sites]
             if set(ids) != set(ordered_ids) or len(ids) != len(ordered_ids):
                 raise ValueError("order must include every site exactly once")
             mapping = {s["id"]: s for s in sites}
             config["api_sites"] = [mapping[id_] for id_ in ordered_ids]
             for index, site in enumerate(config["api_sites"]): site["order"] = index
-            cls._save_config(config)
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
             return cls.get_api_sites()
 
     @classmethod
     def create_subscription(cls, url: str, name: str | None = None) -> dict:
         with cls._config_lock:
-            config = cls._config(); now = cls.now(); sub_id = cls.new_subscription_id()
+            config = cls.load_config()
+            now = int(time.time())
+            sub_id = f"sub_{uuid.uuid4().hex[:12]}"
             sub = {"id": sub_id, "name": name or f"Subscription {sub_id[-6:]}", "url": url, "created_at": now, "updated_at": now, "last_status": "new", "last_job_id": None}
-            config["subscriptions"].append(sub); cls._save_config(config); return deepcopy(sub)
+            config["subscriptions"].append(sub)
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+            return deepcopy(sub)
 
     @classmethod
     def get_subscription(cls, subscription_id: str) -> dict | None:
-        for sub in cls._config().get("subscriptions", []):
+        for sub in cls.load_config().get("subscriptions", []):
             if sub.get("id") == subscription_id: return deepcopy(sub)
         return None
 
     @classmethod
     def update_subscription(cls, subscription_id: str, *, name: str | None = None, url: str | None = None) -> dict | None:
         with cls._config_lock:
-            config = cls._config()
+            config = cls.load_config()
             for sub in config["subscriptions"]:
                 if sub.get("id") != subscription_id: continue
                 url_changed = url is not None and url != sub.get("url")
                 if name is not None: sub["name"] = name
                 if url is not None: sub["url"] = url
-                sub["updated_at"] = cls.now()
+                sub["updated_at"] = int(time.time())
                 if url_changed:
                     sub.update(last_status="new", last_job_id=None)
-                    cls.results_path(subscription_id).unlink(missing_ok=True)
-                    for path in (cls.data_dir() / "jobs").glob("*.json"):
+                    (Path(settings.DATA_DIR) / "results" / f"{subscription_id}.json").unlink(missing_ok=True)
+                    for path in (Path(settings.DATA_DIR) / "jobs").glob("*.json"):
                         job = cls._read_json(path, {})
                         if job.get("subscription_id") == subscription_id and job.get("status") in {"queued", "running"}:
-                            job.update(status="failed", phase="failed", error="Subscription URL changed before refresh completed", finished_at=cls.now())
+                            job.update(status="failed", phase="failed", error="Subscription URL changed before refresh completed", finished_at=int(time.time()))
                             cls._atomic_write(path, job)
-                cls._save_config(config); return deepcopy(sub)
+                cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+                return deepcopy(sub)
         return None
 
     @classmethod
     def delete_subscription(cls, subscription_id: str) -> bool:
         with cls._config_lock:
-            config = cls._config(); old = config["subscriptions"]
+            config = cls.load_config()
+            old = config["subscriptions"]
             config["subscriptions"] = [s for s in old if s.get("id") != subscription_id]
             if len(old) == len(config["subscriptions"]): return False
-            cls.results_path(subscription_id).unlink(missing_ok=True)
-            for path in (cls.data_dir() / "jobs").glob("*.json"):
+            (Path(settings.DATA_DIR) / "results" / f"{subscription_id}.json").unlink(missing_ok=True)
+            for path in (Path(settings.DATA_DIR) / "jobs").glob("*.json"):
                 job = cls._read_json(path, {})
                 if job.get("subscription_id") == subscription_id: path.unlink(missing_ok=True)
-            cls._save_config(config); return True
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+            return True
 
     @classmethod
     def list_subscriptions(cls) -> list[dict]:
         rows = []
-        for sub in sorted(cls._config().get("subscriptions", []), key=lambda s: s.get("created_at", 0), reverse=True):
+        for sub in sorted(cls.load_config().get("subscriptions", []), key=lambda s: s.get("created_at", 0), reverse=True):
             result = cls.get_latest_result(sub["id"])
             rows.append({**deepcopy(sub), "node_count": result["node_count"] if result else 0, "valid_count": result["valid_count"] if result else 0})
         return rows
@@ -320,7 +296,7 @@ class ApiStore:
 
     @classmethod
     def find_active_job(cls, subscription_id: str) -> dict | None:
-        jobs = [cls._read_json(p, {}) for p in (cls.data_dir() / "jobs").glob("*.json")]
+        jobs = [cls._read_json(p, {}) for p in (Path(settings.DATA_DIR) / "jobs").glob("*.json")]
         active = [j for j in jobs if j.get("subscription_id") == subscription_id and j.get("status") in {"queued", "running"}]
         return deepcopy(max(active, key=lambda j: j.get("created_at", 0))) if active else None
 
@@ -343,73 +319,77 @@ class ApiStore:
                 config_snapshot["exit_ip_endpoint"] = str(exit_ip_endpoint_snapshot)
             config_snapshot.setdefault("api_sites", [])
             config_snapshot.setdefault("exit_ip_endpoint", "https://ipwho.is/")
-            now = cls.now(); job_id = cls.new_job_id()
+            now = int(time.time())
+            job_id = f"job_{uuid.uuid4().hex[:12]}"
             job = {"id": job_id, "subscription_id": subscription_id, "status": "queued", "phase": "queued", "processed_nodes": 0, "total_nodes": 0, "error": None, "speedtest_limit": int(speedtest_limit), "force_probe": bool(force_probe), "created_at": now, "started_at": None, "finished_at": None, "probe_config_snapshot": config_snapshot, "api_sites_snapshot": deepcopy(config_snapshot["api_sites"]), "exit_ip_endpoint_snapshot": config_snapshot["exit_ip_endpoint"]}
-            cls._atomic_write(cls.jobs_path(job_id), job)
-            config = cls._config()
+            cls._atomic_write((Path(settings.DATA_DIR) / "jobs" / f"{job_id}.json"), job)
+            config = cls.load_config()
             for sub in config["subscriptions"]:
                 if sub["id"] == subscription_id: sub.update(last_status="queued", last_job_id=job_id, updated_at=now)
-            cls._save_config(config); return deepcopy(job)
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+            return deepcopy(job)
 
     @classmethod
     def get_job(cls, job_id: str) -> dict | None:
-        job = cls._read_json(cls.jobs_path(job_id))
+        job = cls._read_json((Path(settings.DATA_DIR) / "jobs" / f"{job_id}.json"))
         return deepcopy(job) if isinstance(job, dict) else None
 
     @classmethod
     def update_job(cls, job_id: str, **updates: Any) -> None:
         with cls._job_lock(job_id):
-            job = cls._read_json(cls.jobs_path(job_id))
+            job = cls._read_json((Path(settings.DATA_DIR) / "jobs" / f"{job_id}.json"))
             if not isinstance(job, dict): return
             for key, value in updates.items():
                 if value is not None: job[key] = value
-            cls._atomic_write(cls.jobs_path(job_id), job)
+            cls._atomic_write((Path(settings.DATA_DIR) / "jobs" / f"{job_id}.json"), job)
             if updates.get("status") is not None:
                 with cls._config_lock:
-                    config = cls._config()
+                    config = cls.load_config()
                     for sub in config["subscriptions"]:
                         if sub["id"] == job["subscription_id"] and sub.get("last_job_id") == job_id:
-                            sub.update(last_status=job["status"], updated_at=cls.now())
-                    cls._save_config(config)
+                            sub.update(last_status=job["status"], updated_at=int(time.time()))
+                    cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
 
     @classmethod
     def cancel_job(cls, job_id: str, reason: str = "Canceled by user") -> dict | None:
         job = cls.get_job(job_id)
         if not job: return None
         if job.get("status") in {"queued", "running"}:
-            cls.update_job(job_id, status="canceled", phase="canceled", error=reason, finished_at=cls.now())
+            cls.update_job(job_id, status="canceled", phase="canceled", error=reason, finished_at=int(time.time()))
         return cls.get_job(job_id)
 
     @classmethod
     def fail_stale_active_jobs(cls, reason: str) -> int:
         count = 0
-        for path in (cls.data_dir() / "jobs").glob("*.json"):
+        for path in (Path(settings.DATA_DIR) / "jobs").glob("*.json"):
             job = cls._read_json(path, {})
             if job.get("status") in {"queued", "running"}:
-                cls.update_job(job["id"], status="failed", phase="failed", error=reason, finished_at=cls.now()); count += 1
+                cls.update_job(job["id"], status="failed", phase="failed", error=reason, finished_at=int(time.time()))
+                count += 1
         return count
 
     @classmethod
     def _result_payload(cls, subscription_id: str, nodes: list[TestedNode], api_sites_snapshot: list[dict] | None = None, exit_ip_endpoint_snapshot: str | None = None) -> dict:
-        now = cls.now()
+        now = int(time.time())
         return {"subscription_id": subscription_id, "nodes": [asdict(n) for n in nodes], "node_count": len(nodes), "valid_count": sum(n.analyzed_node.is_valid for n in nodes), "updated_at": now, "api_sites_snapshot": [cls._public_site(s) for s in (api_sites_snapshot or [])], "exit_ip_endpoint_snapshot": exit_ip_endpoint_snapshot}
 
     @classmethod
     def save_results(cls, subscription_id: str, nodes: list[TestedNode], api_sites_snapshot: list[dict] | None = None) -> None:
-        with cls._result_lock(subscription_id): cls._atomic_write(cls.results_path(subscription_id), cls._result_payload(subscription_id, nodes, api_sites_snapshot))
+        with cls._result_lock(subscription_id): cls._atomic_write((Path(settings.DATA_DIR) / "results" / f"{subscription_id}.json"), cls._result_payload(subscription_id, nodes, api_sites_snapshot))
 
     @classmethod
     def save_results_if_current(cls, subscription_id: str, job_id: str, expected_url: str, nodes: list[TestedNode]) -> bool:
         with cls._result_lock(subscription_id):
-            sub = cls.get_subscription(subscription_id); job = cls.get_job(job_id)
+            sub = cls.get_subscription(subscription_id)
+            job = cls.get_job(job_id)
             if not sub or not job or sub.get("url") != expected_url or sub.get("last_job_id") != job_id or job.get("status") != "running": return False
-            cls._atomic_write(cls.results_path(subscription_id), cls._result_payload(subscription_id, nodes, job.get("api_sites_snapshot", []), job.get("exit_ip_endpoint_snapshot")))
-            cls.update_job(job_id, status="completed", phase="completed", processed_nodes=len(nodes), total_nodes=len(nodes), finished_at=cls.now())
+            cls._atomic_write((Path(settings.DATA_DIR) / "results" / f"{subscription_id}.json"), cls._result_payload(subscription_id, nodes, job.get("api_sites_snapshot", []), job.get("exit_ip_endpoint_snapshot")))
+            cls.update_job(job_id, status="completed", phase="completed", processed_nodes=len(nodes), total_nodes=len(nodes), finished_at=int(time.time()))
             return True
 
     @classmethod
     def get_latest_result(cls, subscription_id: str) -> dict | None:
-        data = cls._read_json(cls.results_path(subscription_id))
+        data = cls._read_json((Path(settings.DATA_DIR) / "results" / f"{subscription_id}.json"))
         if not isinstance(data, dict): return None
         try: data["nodes"] = restore_tested_nodes(data.get("nodes", []))
         except (TypeError, ValueError, KeyError): return None
@@ -417,7 +397,7 @@ class ApiStore:
 
     @classmethod
     def list_singbox_templates(cls) -> list[dict]:
-        return sorted(deepcopy(cls._config().get("singbox_templates", [])), key=lambda t: t.get("created_at", 0), reverse=True)
+        return sorted(deepcopy(cls.load_config().get("singbox_templates", [])), key=lambda t: t.get("created_at", 0), reverse=True)
 
     @classmethod
     def get_singbox_template(cls, template_id: str) -> dict | None:
@@ -426,22 +406,32 @@ class ApiStore:
     @classmethod
     def create_singbox_template(cls, name: str, content: str) -> dict:
         with cls._config_lock:
-            config = cls._config(); now = cls.now(); tpl = {"id": cls.new_template_id(), "name": name, "content": content, "created_at": now, "updated_at": now}; config["singbox_templates"].append(tpl); cls._save_config(config); return deepcopy(tpl)
+            config = cls.load_config()
+            now = int(time.time())
+            tpl = {"id": f"tpl_{uuid.uuid4().hex[:12]}", "name": name, "content": content, "created_at": now, "updated_at": now}
+            config["singbox_templates"].append(tpl)
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+            return deepcopy(tpl)
 
     @classmethod
     def update_singbox_template(cls, template_id: str, *, name: str | None = None, content: str | None = None) -> dict | None:
         with cls._config_lock:
-            config = cls._config()
+            config = cls.load_config()
             for tpl in config["singbox_templates"]:
                 if tpl["id"] == template_id:
                     if name is not None: tpl["name"] = name
                     if content is not None: tpl["content"] = content
-                    tpl["updated_at"] = cls.now(); cls._save_config(config); return deepcopy(tpl)
+                    tpl["updated_at"] = int(time.time())
+                    cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+                    return deepcopy(tpl)
         return None
 
     @classmethod
     def delete_singbox_template(cls, template_id: str) -> bool:
         with cls._config_lock:
-            config = cls._config(); old = config["singbox_templates"]; config["singbox_templates"] = [t for t in old if t["id"] != template_id]
+            config = cls.load_config()
+            old = config["singbox_templates"]
+            config["singbox_templates"] = [t for t in old if t["id"] != template_id]
             if len(old) == len(config["singbox_templates"]): return False
-            cls._save_config(config); return True
+            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+            return True

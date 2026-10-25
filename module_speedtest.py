@@ -7,11 +7,6 @@ from settings import settings
 
 class BandwidthTester:
     @staticmethod
-    def bytes_to_count(downloaded_bytes: int, chunk_size: int, max_bytes: int) -> int:
-        remaining = max(0, max_bytes - downloaded_bytes)
-        return min(chunk_size, remaining)
-
-    @staticmethod
     async def run_speed_test(analyzed_node: AnalyzedNode, socks5_url: str, *, precise: bool = False) -> TestedNode:
         download_speed_mbps = 0.0
         transport = AsyncProxyTransport.from_url(socks5_url)
@@ -32,9 +27,7 @@ class BandwidthTester:
                     try:
                         async with asyncio.timeout(settings.SPEEDTEST_TIMEOUT):
                             async for chunk in resp.aiter_raw():
-                                downloaded_bytes += BandwidthTester.bytes_to_count(
-                                    downloaded_bytes, len(chunk), max_bytes,
-                                )
+                                downloaded_bytes += min(len(chunk), max(0, max_bytes - downloaded_bytes))
                                 if downloaded_bytes >= max_bytes:
                                     break
                     except (httpx.ReadTimeout, asyncio.TimeoutError, httpx.RemoteProtocolError):

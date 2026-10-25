@@ -13,7 +13,12 @@ from settings import settings
 _setup_lock = threading.Lock()
 
 
-def _setup_core(name: str, path: str, repository: str, asset_suffix: str) -> None:
+def setup_core() -> None:
+    """Prepare the selected proxy core for Windows amd64 when it is missing."""
+    if settings.PROXY_CORE == "xray":
+        name, path, repository, asset_suffix = "xray", settings.XRAY_PATH, "XTLS/Xray-core", "windows-64.zip"
+    else:
+        name, path, repository, asset_suffix = "sing-box", settings.SING_BOX_PATH, "SagerNet/sing-box", "windows-amd64.zip"
     with _setup_lock:
         if os.path.exists(path) or shutil.which(path) or shutil.which(name):
             return
@@ -43,15 +48,5 @@ def _setup_core(name: str, path: str, repository: str, asset_suffix: str) -> Non
             raise RuntimeError(f"Failed to prepare {name}: {error}") from error
 
 
-def setup_singbox():
-    """Download sing-box for Windows amd64 when it is missing."""
-    _setup_core("sing-box", settings.SING_BOX_PATH, "SagerNet/sing-box", "windows-amd64.zip")
-
-
-def setup_xray():
-    """Download Xray for Windows amd64 when it is missing."""
-    _setup_core("xray", settings.XRAY_PATH, "XTLS/Xray-core", "windows-64.zip")
-
-
 if __name__ == "__main__":
-    setup_xray() if settings.PROXY_CORE == "xray" else setup_singbox()
+    setup_core()

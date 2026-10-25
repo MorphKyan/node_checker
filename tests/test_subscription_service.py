@@ -46,7 +46,7 @@ class SubscriptionRefreshServiceTests(unittest.TestCase):
                 self.subTest(nodes=len(analyzed)),
                 patch.object(SubscriptionRefreshService, "process_node_filter", side_effect=analyzed),
                 patch.object(SubscriptionRefreshService, "run_speed_test") as speedtest,
-                patch("module_subscription_service.ProbeCache.probe_config_snapshot", return_value={}),
+                patch("module_subscription_service.ApiStore.get_probe_config_snapshot", return_value={}),
             ):
                 result = asyncio.run(SubscriptionRefreshService.run_nodes(
                     [item.node for item in analyzed], speedtest_limit=0,

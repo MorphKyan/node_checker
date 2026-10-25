@@ -10,14 +10,6 @@ def pad_string(s: str, width: int) -> str:
 
 class ResultExporter:
     @staticmethod
-    def sanitize_filename(name: str) -> str:
-        return re.sub(r'[\\/*?:"<>|]', "_", name)
-
-    @staticmethod
-    def format_profile_labels(profile) -> str:
-        return "/".join(profile.display_labels) if profile.display_labels else "未知"
-
-    @staticmethod
     def format_profile_evidence(profile) -> str:
         if not profile.evidence:
             return "No evidence"
@@ -57,7 +49,7 @@ class ResultExporter:
             geo = str(probe.actual_geo)
             remark = str(an.node.remark)[:40]
             actual_ip = str(probe.actual_ip)
-            profile = ResultExporter.format_profile_labels(probe.profile)
+            profile = ("/".join(probe.profile.display_labels) if probe.profile.display_labels else "未知")
             
             speed = "Not tested" if tn.download_speed_mbps is None else f"{tn.download_speed_mbps:.2f}"
             
@@ -77,7 +69,7 @@ class ResultExporter:
             return "| " + " | ".join(pad_string(val, widths[i]) for i, val in enumerate(row_data)) + " |"
 
         lines = []
-        lines.append("# 🚀 Vless Node Checker Report\n")
+        lines.append("# 🚀 Node Checker Report\n")
         lines.append(format_row(headers))
         lines.append("|" + "|".join("-" * (widths[i] + 2) for i in range(len(widths))) + "|")
         
@@ -89,7 +81,7 @@ class ResultExporter:
             probe = an.probe
             
             # Write detailed report for each node
-            safe_remark = ResultExporter.sanitize_filename(an.node.remark or "Unnamed")
+            safe_remark = re.sub(r'[\\/*?:"<>|]', "_", an.node.remark or "Unnamed")
             safe_remark = f"{safe_remark[:80]}_{make_node_fingerprint(an.node)[:16]}"
             detail_path = os.path.join(details_dir, f"{safe_remark}.md")
             
@@ -132,7 +124,7 @@ class ResultExporter:
 - **Actual IPv6 IP**: `{probe.actual_ipv6 or "N/A"}`
 
 ### Node Profile
-- **Labels**: `{ResultExporter.format_profile_labels(probe.profile)}`
+- **Labels**: `{("/".join(probe.profile.display_labels) if probe.profile.display_labels else "未知")}`
 - **Risk Score**: `{"Unknown" if probe.profile.risk_score is None else f"{probe.profile.risk_score:.1f}"}`
 - **Confidence**: `{probe.profile.confidence}`
 - **Evidence**: `{ResultExporter.format_profile_evidence(probe.profile)}`

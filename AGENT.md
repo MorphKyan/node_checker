@@ -1,8 +1,8 @@
-# Vless Node Checker - Agent Context
+# Node Checker - Agent Context
 
 ## Project Overview
 
-Vless Node Checker is a local VLESS subscription enhancement and node intelligence service. It accepts a subscription URL or local subscription file, parses `vless://` URIs, starts temporary `sing-box` tunnels, probes node quality, queries IP intelligence APIs, builds a node profile, scores each node, and exports both human-readable reports and enhanced subscription links.
+Node Checker is a local multi-protocol node analysis website and subscription enhancement service. It accepts a subscription URL or local subscription file, parses supported proxy URIs, starts temporary `sing-box` or `Xray` tunnels, probes node quality, queries IP intelligence APIs, builds a node profile, scores each node, and exports both human-readable reports and enhanced subscription links.
 
 The practical product direction is:
 
@@ -29,20 +29,20 @@ The service should be treated as a "subscription relay + node profiling + qualit
 ## Directory Structure
 
 - `api_server.py`: FastAPI backend for subscriptions, refresh jobs, enhanced subscription output, detailed results, and runtime settings.
-- `models.py`: Dataclasses for VLESS nodes, probe data, IP intelligence verdicts, node profiles, analyzed nodes, and speed-tested nodes.
+- `models.py`: Dataclasses for multiple node protocols, probe data, IP intelligence verdicts, node profiles, analyzed nodes, and speed-tested nodes.
 - `settings.py`: Runtime defaults for concurrency, timeouts, API endpoints, cache paths, name length limits, and speedtest defaults.
 - `module_runtime_settings.py`: Editable runtime settings persisted for the API service.
 - `module_setup.py`: Environment preparation for local `sing-box.exe`.
-- `module_parser.py`: Subscription fetch/decode logic and `vless://` URI parsing.
+- `module_parser.py`: Subscription fetch/decode logic and multi-protocol URI parsing.
 - `module_tunnel.py`: Temporary `sing-box` process lifecycle and per-node tunnel config handling.
-- `module_probe.py`: TCP ping, TTFB, exit IP lookup, IP intelligence API calls, traceroute analysis, and profile aggregation input.
+- `module_probe.py`: TCP ping, TTFB, exit IP lookup, IP intelligence API calls, and profile aggregation input; route fields are reserved for future measurement.
 - `module_profile.py`: Normalizes IP intelligence responses into network labels, risk labels, risk scores, confidence, and evidence.
 - `module_analyzer.py`: Validity checks based solely on successful TTFB.
 - `module_speedtest.py`: Top-N download speed test for selected valid nodes.
 - `module_cache.py`: Probe result cache backed by JSON files.
 - `module_api_store.py`: JSON storage for subscriptions, refresh jobs, and latest completed results.
 - `module_subscription_service.py`: Async refresh orchestration for API jobs.
-- `module_subscription_exporter.py`: Enhanced VLESS URI generation, name templating, sorting, dedupe, truncation, and base64 encoding.
+- `module_subscription_exporter.py`: Enhanced node URI generation, name templating, sorting, dedupe, truncation, and base64 encoding.
 - `module_exporter.py`: CLI Markdown summary and per-node detailed report generation.
 - `main.py`: CLI orchestrator implementing fetch, filter, Top-N speedtest, and export.
 - `frontend/`: React/Vite dashboard for subscriptions, jobs, nodes, export preview, and runtime settings.

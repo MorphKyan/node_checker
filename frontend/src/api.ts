@@ -45,7 +45,6 @@ function formatDetail(detail: unknown, fallback: string): string {
 
 export interface ApiClient {
   listSubscriptions(): Promise<SubscriptionSummary[]>;
-  getSubscription(id: string): Promise<SubscriptionSummary>;
   createSubscription(input: { name?: string; url: string }): Promise<{ subscription_id: string; job_id: string; status: string }>;
   updateSubscription(id: string, input: { name?: string; url?: string }): Promise<SubscriptionSummary>;
   deleteSubscription(id: string): Promise<{ deleted: boolean; subscription_id: string }>;
@@ -76,10 +75,6 @@ export interface ApiClient {
 function joinUrl(baseUrl: string, path: string): string {
   if (!baseUrl) return path;
   return `${baseUrl.replace(/\/$/, "")}${path}`;
-}
-
-function pathSegment(value: string): string {
-  return encodeURIComponent(value);
 }
 
 async function request<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
@@ -114,32 +109,31 @@ async function request<T>(baseUrl: string, path: string, init?: RequestInit): Pr
 export function createApiClient(baseUrl: string): ApiClient {
   return {
     listSubscriptions: () => request(baseUrl, "/subscriptions"),
-    getSubscription: (id) => request(baseUrl, `/subscriptions/${pathSegment(id)}`),
     createSubscription: (input) =>
       request(baseUrl, "/subscriptions", {
         method: "POST",
         body: JSON.stringify(input),
       }),
     updateSubscription: (id, input) =>
-      request(baseUrl, `/subscriptions/${pathSegment(id)}`, {
+      request(baseUrl, `/subscriptions/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(input),
       }),
     deleteSubscription: (id) =>
-      request(baseUrl, `/subscriptions/${pathSegment(id)}`, {
+      request(baseUrl, `/subscriptions/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
     refreshSubscription: (id, input) =>
-      request(baseUrl, `/subscriptions/${pathSegment(id)}/refresh`, {
+      request(baseUrl, `/subscriptions/${encodeURIComponent(id)}/refresh`, {
         method: "POST",
         body: JSON.stringify(input),
       }),
-    getJob: (id) => request(baseUrl, `/jobs/${pathSegment(id)}`),
+    getJob: (id) => request(baseUrl, `/jobs/${encodeURIComponent(id)}`),
     cancelJob: (id) =>
-      request(baseUrl, `/jobs/${pathSegment(id)}/cancel`, {
+      request(baseUrl, `/jobs/${encodeURIComponent(id)}/cancel`, {
         method: "POST",
       }),
-    getResults: (id) => request(baseUrl, `/subscriptions/${pathSegment(id)}/results`),
+    getResults: (id) => request(baseUrl, `/subscriptions/${encodeURIComponent(id)}/results`),
     getEnhanced: (id, params) => request(baseUrl, enhancedPath(id, params)),
     getSettings: () => request(baseUrl, "/settings"),
     getSettingsMetadata: () => request(baseUrl, "/settings/metadata"),
@@ -151,8 +145,8 @@ export function createApiClient(baseUrl: string): ApiClient {
     getApiSites: () => request(baseUrl, "/api-sites"),
     getApiSiteProviders: () => request(baseUrl, "/api-sites/providers"),
     createApiSite: (input) => request(baseUrl, "/api-sites", { method: "POST", body: JSON.stringify(input) }),
-    updateApiSite: (id, input) => request(baseUrl, `/api-sites/${pathSegment(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
-    deleteApiSite: (id) => request(baseUrl, `/api-sites/${pathSegment(id)}`, { method: "DELETE" }),
+    updateApiSite: (id, input) => request(baseUrl, `/api-sites/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
+    deleteApiSite: (id) => request(baseUrl, `/api-sites/${encodeURIComponent(id)}`, { method: "DELETE" }),
     orderApiSites: (ids) => request(baseUrl, "/api-sites/order", { method: "PUT", body: JSON.stringify({ ids }) }),
     updateExitIpEndpoint: (exit_ip_endpoint) => request(baseUrl, "/exit-ip-endpoint", { method: "PATCH", body: JSON.stringify({ exit_ip_endpoint }) }),
 
@@ -163,12 +157,12 @@ export function createApiClient(baseUrl: string): ApiClient {
         body: JSON.stringify(input),
       }),
     updateSingboxTemplate: (id, input) =>
-      request(baseUrl, `/singbox/templates/${pathSegment(id)}`, {
+      request(baseUrl, `/singbox/templates/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(input),
       }),
     deleteSingboxTemplate: (id) =>
-      request(baseUrl, `/singbox/templates/${pathSegment(id)}`, {
+      request(baseUrl, `/singbox/templates/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
     getSingboxExport: (subscriptionIds, templateId, params) => request(baseUrl, singboxPath(subscriptionIds, templateId, params)),

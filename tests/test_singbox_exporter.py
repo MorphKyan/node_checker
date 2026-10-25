@@ -1,7 +1,7 @@
 import unittest
 from models import LabelEvidence, TestedNode, VlessNode, AnalyzedNode, NodeProfile, ProbeData
 from module_api_presenter import build_detail_nodes, build_plain_subscription
-from module_singbox_exporter import generate_singbox_config, strip_comments, validate_singbox_template_content
+from module_singbox_exporter import generate_singbox_config, strip_comments, parse_singbox_template
 from settings import settings
 
 def make_mock_tested_node(
@@ -88,8 +88,8 @@ class SingboxExporterTests(unittest.TestCase):
         self.assertEqual(parsed["key"], "value")
         self.assertEqual(parsed["url"], "https://github.com")
 
-    def test_validate_singbox_template_content_accepts_comments_without_outbounds(self):
-        validate_singbox_template_content(
+    def test_parse_singbox_template_accepts_comments_without_outbounds(self):
+        parse_singbox_template(
             """
             {
                 // outbounds are filled later
@@ -100,13 +100,13 @@ class SingboxExporterTests(unittest.TestCase):
             """
         )
 
-    def test_validate_singbox_template_content_rejects_invalid_json(self):
+    def test_parse_singbox_template_rejects_invalid_json(self):
         with self.assertRaisesRegex(ValueError, "Failed to parse template JSON"):
-            validate_singbox_template_content('{ "log": }')
+            parse_singbox_template('{ "log": }')
 
-    def test_validate_singbox_template_content_rejects_non_object(self):
+    def test_parse_singbox_template_rejects_non_object(self):
         with self.assertRaisesRegex(ValueError, "Template must be a JSON object"):
-            validate_singbox_template_content("[]")
+            parse_singbox_template("[]")
 
     def test_generate_singbox_config(self):
         template_str = """{

@@ -66,14 +66,6 @@ class SubscriptionExporter:
         return "/".join(display) if display else fallback
 
     @staticmethod
-    def format_network_labels(profile) -> str:
-        return SubscriptionExporter.format_labels(profile.network_labels, "未知网络")
-
-    @staticmethod
-    def format_type_labels(profile) -> str:
-        return SubscriptionExporter.format_labels(profile.risk_labels, "未知类型")
-
-    @staticmethod
     def format_location(geo: str) -> str:
         geo_code = (geo or "Unknown").upper()
         if geo_code == "UNKNOWN":
@@ -86,10 +78,6 @@ class SubscriptionExporter:
         if ms >= 9999.0:
             return "超时"
         return f"{ms:.0f}ms"
-
-    @staticmethod
-    def format_risk(score: float | None) -> str:
-        return "风险未知" if score is None else f"风险 {score:.0f}"
 
     @staticmethod
     def format_speed(mbps: float | None) -> str:
@@ -144,9 +132,9 @@ class SubscriptionExporter:
         geo_code = SubscriptionExporter.choose_geo(tested_node)
         parts = [
             SubscriptionExporter.format_location(geo_code),
-            SubscriptionExporter.format_network_labels(profile),
-            SubscriptionExporter.format_type_labels(profile),
-            SubscriptionExporter.format_risk(profile.risk_score),
+            SubscriptionExporter.format_labels(profile.network_labels, "未知网络"),
+            SubscriptionExporter.format_labels(profile.risk_labels, "未知类型"),
+            ("风险未知" if profile.risk_score is None else f"风险 {profile.risk_score:.0f}"),
         ]
 
         if mode == "compact":
@@ -170,7 +158,7 @@ class SubscriptionExporter:
         return truncate_visual(remark, max_length)
 
     @staticmethod
-    def rewrite_vless_remark(raw_uri: str, remark: str) -> str:
+    def rewrite_node_remark(raw_uri: str, remark: str) -> str:
         base_uri = raw_uri.split("#", 1)[0]
         encoded_remark = urllib.parse.quote(remark, safe="")
         return f"{base_uri}#{encoded_remark}"
@@ -225,7 +213,7 @@ class SubscriptionExporter:
         sorted_nodes = SubscriptionExporter.sort_nodes(nodes, valid_only=valid_only)
         remarks = SubscriptionExporter.build_names(sorted_nodes, mode, max_name_length)
         return [
-            SubscriptionExporter.rewrite_vless_remark(node.analyzed_node.node.raw_uri, remark)
+            SubscriptionExporter.rewrite_node_remark(node.analyzed_node.node.raw_uri, remark)
             for node, remark in zip(sorted_nodes, remarks)
         ]
 

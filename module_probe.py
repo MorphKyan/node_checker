@@ -155,11 +155,7 @@ class LightweightProbe:
     ) -> ProbeData:
         from module_api_store import ApiStore
 
-        if probe_config is None:
-            probe_config = ApiStore.get_probe_config_snapshot() if api_sites is None else {
-                "api_sites": api_sites,
-                "exit_ip_endpoint": ApiStore.get_exit_ip_endpoint(),
-            }
+        probe_config = ApiStore.get_probe_config_snapshot(probe_config, api_sites)
         tcp, ttfb, ipv6, intelligence = await asyncio.gather(
             LightweightProbe.tcp_ping(node.server_ip, node.server_port),
             LightweightProbe.test_ttfb(socks5_url, settings.TTFB_TARGET_URL),

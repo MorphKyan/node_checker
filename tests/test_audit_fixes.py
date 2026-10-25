@@ -18,7 +18,7 @@ from module_api_store import ApiStore
 from module_cache import ProbeCache
 from module_node_identity import make_node_fingerprint
 from module_probe import LightweightProbe
-from module_setup import setup_singbox, setup_xray
+from module_setup import setup_core
 from module_singbox_exporter import generate_singbox_config, strip_comments
 from module_singbox_outbound import singbox_outbound
 from module_subscription_exporter import SubscriptionExporter, get_visual_width
@@ -103,21 +103,22 @@ class AuditFixTests(unittest.TestCase):
             self.assertIn("xhttp", response.json()["detail"])
 
     def test_core_downloads_use_timeouts_and_the_configured_destination(self):
-        for name, setting, setup, asset_name in [
-            ("sing-box", "SING_BOX_PATH", setup_singbox, "sing-box-windows-amd64.zip"),
-            ("xray", "XRAY_PATH", setup_xray, "Xray-windows-64.zip"),
+        for name, setting, asset_name in [
+            ("sing-box", "SING_BOX_PATH", "sing-box-windows-amd64.zip"),
+            ("xray", "XRAY_PATH", "Xray-windows-64.zip"),
         ]:
             archive_data = io.BytesIO()
             with zipfile.ZipFile(archive_data, "w") as archive:
                 archive.writestr(f"release/{name}.exe", b"executable")
             release = {"assets": [{"name": asset_name, "browser_download_url": "https://download.test/core.zip"}]}
             with tempfile.TemporaryDirectory() as directory, patch.object(settings, setting, str(Path(directory, "nested", f"{name}.exe"))), \
+                 patch.object(settings, "PROXY_CORE", name if name == "xray" else "sing-box"), \
                  patch("module_setup.shutil.which", return_value=None), \
                  patch("module_setup.urllib.request.urlopen", side_effect=[io.BytesIO(json.dumps(release).encode()), io.BytesIO(archive_data.getvalue())]) as request:
-                setup()
+                setup_core()
                 self.assertEqual(Path(getattr(settings, setting)).read_bytes(), b"executable")
                 self.assertEqual([call.kwargs["timeout"] for call in request.call_args_list], [30, 30])
-                setup()
+                setup_core()
                 self.assertEqual(request.call_count, 2)
                 self.assertEqual(list(Path(directory).rglob("*.download")), [])
 
@@ -125,8 +126,8 @@ class AuditFixTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(settings, "SING_BOX_PATH", str(Path(directory, "core.exe"))), \
              patch("module_setup.shutil.which", return_value=None), \
              patch("module_setup.urllib.request.urlopen", side_effect=TimeoutError("stalled")):
-            with self.assertRaisesRegex(RuntimeError, "Failed to prepare sing-box"):
-                setup_singbox()
+            with patch.object(settings, "PROXY_CORE", "sing-box"), self.assertRaisesRegex(RuntimeError, "Failed to prepare sing-box"):
+                setup_core()
             self.assertEqual(list(Path(directory).iterdir()), [])
 
 
@@ -221,8 +222,7 @@ class AsyncAuditFixTests(unittest.IsolatedAsyncioTestCase):
                 if not release.wait(2):
                     raise AssertionError("event loop blocked during setup")
             with self.subTest(core=core), patch.object(settings, "PROXY_CORE", core), \
-                 patch("module_subscription_service.setup_singbox", side_effect=setup if core == "sing-box" else AssertionError("wrong core")) as singbox, \
-                 patch("module_subscription_service.setup_xray", side_effect=setup if core == "xray" else AssertionError("wrong core")) as xray, \
+                 patch("module_subscription_service.setup_core", side_effect=setup) as prepare, \
                  patch.object(ApiStore, "get_subscription", return_value=None):
                 task = asyncio.create_task(SubscriptionRefreshService.run_subscription_refresh("missing", "job", speedtest_limit=0))
                 try:
@@ -232,11 +232,11 @@ class AsyncAuditFixTests(unittest.IsolatedAsyncioTestCase):
                     release.set()
                     with self.assertRaisesRegex(ValueError, "Subscription not found"):
                         await task
-                self.assertEqual((singbox.call_count, xray.call_count), (1, 0) if core == "sing-box" else (0, 1))
+                prepare.assert_called_once_with()
 
     async def test_deleting_subscription_cancels_running_scan(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory):
-            ApiStore.init_db()
+            ApiStore.load_config()
             sub = ApiStore.create_subscription("https://subscription.test")
             started, stopped = asyncio.Event(), asyncio.Event()
             async def scan(*args, **kwargs):

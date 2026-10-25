@@ -136,29 +136,18 @@ class TunnelController:
         return path
 
     @staticmethod
-    def generate_config(node: ProxyNode, local_port: int) -> str:
-        core_type = getattr(settings, "PROXY_CORE", "sing-box")
-        if core_type == "xray":
-            return TunnelController.generate_xray_config(node, local_port)
-        else:
-            return TunnelController.generate_singbox_config(node, local_port)
-
-    @staticmethod
     async def start_tunnel(node: ProxyNode, local_port: int):
-        config_path = TunnelController.generate_config(node, local_port)
-        core_type = getattr(settings, "PROXY_CORE", "sing-box")
-        
-        if core_type == "xray":
-            xray_exe = os.path.join(os.getcwd(), settings.XRAY_PATH)
-            if not os.path.exists(xray_exe):
-                xray_exe = "xray" # fallback to path
-            cmd = [xray_exe, "-c", config_path]
+        if settings.PROXY_CORE == "xray":
+            config_path = TunnelController.generate_xray_config(node, local_port)
+            executable, fallback, arguments = settings.XRAY_PATH, "xray", []
         else:
-            sing_box_exe = os.path.join(os.getcwd(), settings.SING_BOX_PATH)
-            if not os.path.exists(sing_box_exe):
-                sing_box_exe = "sing-box" # fallback to path
-            cmd = [sing_box_exe, "run", "-c", config_path]
-            
+            config_path = TunnelController.generate_singbox_config(node, local_port)
+            executable, fallback, arguments = settings.SING_BOX_PATH, "sing-box", ["run"]
+        executable = os.path.join(os.getcwd(), executable)
+        if not os.path.exists(executable):
+            executable = fallback
+        cmd = [executable, *arguments, "-c", config_path]
+
         process = None
         try:
             process = await asyncio.create_subprocess_exec(

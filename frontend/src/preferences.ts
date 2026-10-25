@@ -1,6 +1,6 @@
 import type { ExportFormat, ExportMode, LocalPreferences } from "./types";
 
-const storageKey = "vless-node-checker.preferences";
+const storageKey = "node-checker.preferences";
 
 export const defaultPreferences: LocalPreferences = {
   apiBaseUrl: "",
@@ -13,13 +13,14 @@ export const defaultPreferences: LocalPreferences = {
 export function loadPreferences(): LocalPreferences {
   try {
     const raw = localStorage.getItem(storageKey);
-    if (!raw) return defaultPreferences;
-    const stored = JSON.parse(raw);
+    // Keep existing browser preferences when upgrading the project name.
+    const stored = JSON.parse(raw ?? localStorage.getItem("vless-node-checker.preferences") ?? "null");
+    if (!stored) return defaultPreferences;
     const preferences = { ...defaultPreferences, ...stored };
     if (stored.autoRefreshVersion !== 1) {
       preferences.autoRefresh = true;
-      savePreferences(preferences);
     }
+    if (!raw || stored.autoRefreshVersion !== 1) savePreferences(preferences);
     return preferences;
   } catch {
     return defaultPreferences;

@@ -59,27 +59,19 @@ class NodeParser:
         return "Unknown"
 
     @staticmethod
-    def parse_vless_line(line: str) -> VlessNode:
-        main_part, *remark_part = line.split('#', 1)
-        remark = urllib.parse.unquote(remark_part[0]) if remark_part else ""
-        
-        uri_str = main_part[len("vless://"):]
-        creds, server_port_params = uri_str.split('@', 1)
-        uuid = creds
-        
-        if '?' in server_port_params:
-            server_port_str, params_str = server_port_params.split('?', 1)
-        else:
-            server_port_str = server_port_params
-            params_str = ""
-            
-        parsed_server = urllib.parse.urlsplit(f"//{server_port_str}")
-        server_ip = parsed_server.hostname
-        server_port = parsed_server.port
-        if not server_ip or server_port is None:
+    def _parse_endpoint(line: str) -> tuple[str, str, int, dict[str, str], str]:
+        main, _, fragment = line.partition('#')
+        credentials, server_params = main.partition('://')[2].split('@', 1)
+        server, _, query = server_params.partition('?')
+        endpoint = urllib.parse.urlsplit(f"//{server}")
+        if not endpoint.hostname or endpoint.port is None:
             raise ValueError("Missing server host or port")
-        
-        params = dict(urllib.parse.parse_qsl(params_str))
+        return (credentials, endpoint.hostname, endpoint.port,
+                dict(urllib.parse.parse_qsl(query)), urllib.parse.unquote(fragment))
+
+    @staticmethod
+    def parse_vless_line(line: str) -> VlessNode:
+        uuid, server_ip, server_port, params, remark = NodeParser._parse_endpoint(line)
         transport_type = params.get("type", "tcp")
         transport_path = (
             params.get("serviceName") or params.get("path", "")
@@ -87,16 +79,13 @@ class NodeParser:
             else params.get("path", "")
         )
         
-        expected_geo = NodeParser._match_geo(remark)
-                
         return VlessNode(
             raw_uri=line,
             uuid=uuid,
             server_ip=server_ip,
             server_port=server_port,
             remark=remark,
-            expected_geo=expected_geo,
-            protocol="vless",
+            expected_geo=NodeParser._match_geo(remark),
             flow=params.get("flow", ""),
             security=params.get("security", ""),
             sni=params.get("sni", ""),
@@ -112,30 +101,8 @@ class NodeParser:
 
     @staticmethod
     def parse_hy2_line(line: str) -> Hy2Node:
-        main_part, *remark_part = line.split('#', 1)
-        remark = urllib.parse.unquote(remark_part[0]) if remark_part else ""
-        
-        if main_part.startswith("hysteria2://"):
-            uri_str = main_part[len("hysteria2://"):]
-        else:
-            uri_str = main_part[len("hy2://"):]
-
-        creds, server_port_params = uri_str.split('@', 1)
+        creds, server_ip, server_port, params, remark = NodeParser._parse_endpoint(line)
         password = urllib.parse.unquote(creds)
-
-        if '?' in server_port_params:
-            server_port_str, params_str = server_port_params.split('?', 1)
-        else:
-            server_port_str = server_port_params
-            params_str = ""
-
-        parsed_server = urllib.parse.urlsplit(f"//{server_port_str}")
-        server_ip = parsed_server.hostname
-        server_port = parsed_server.port
-        if not server_ip or server_port is None:
-            raise ValueError("Missing server host or port")
-
-        params = dict(urllib.parse.parse_qsl(params_str))
         sni = params.get("sni") or params.get("peer") or ""
         insecure_raw = params.get("insecure") or params.get("allow_insecure") or params.get("allowInsecure") or "0"
         insecure = str(insecure_raw).lower() in {"1", "true", "yes"}
@@ -148,16 +115,13 @@ class NodeParser:
         down_val = params.get("down") or params.get("down_mbps")
         down_mbps = int(down_val) if down_val and str(down_val).isdigit() else None
 
-        expected_geo = NodeParser._match_geo(remark)
-
         return Hy2Node(
             raw_uri=line,
             password=password,
             server_ip=server_ip,
             server_port=server_port,
             remark=remark,
-            expected_geo=expected_geo,
-            protocol="hy2",
+            expected_geo=NodeParser._match_geo(remark),
             sni=sni,
             insecure=insecure,
             obfs=obfs,
@@ -228,5 +192,3 @@ class NodeParser:
                 print(f"[Parser] Failed to parse {scheme} line (invalid URI)")
                 
         return nodes
-
-VlessParser = NodeParser

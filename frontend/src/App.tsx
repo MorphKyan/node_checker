@@ -292,8 +292,8 @@ export default function App() {
     <div className="flex min-h-screen bg-slate-50">
       <aside className="fixed inset-y-0 left-0 w-60 border-r border-border bg-white">
         <div className="border-b border-border px-5 py-5">
-          <div className="text-lg font-semibold text-slate-950">Node Console</div>
-          <div className="mt-1 text-xs text-slate-500">VLESS 订阅运维控制台</div>
+          <div className="text-lg font-semibold text-slate-950">Node Checker</div>
+          <div className="mt-1 text-xs text-slate-500">多协议节点分析控制台</div>
         </div>
         <nav className="space-y-1 p-3">
           {navItems.map((item) => {

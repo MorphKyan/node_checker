@@ -10,11 +10,6 @@ from settings import settings
 
 
 class BandwidthTesterTests(unittest.TestCase):
-    def test_bytes_to_count_truncates_chunk_at_max_bytes(self):
-        self.assertEqual(BandwidthTester.bytes_to_count(0, 8, 10), 8)
-        self.assertEqual(BandwidthTester.bytes_to_count(8, 8, 10), 2)
-        self.assertEqual(BandwidthTester.bytes_to_count(10, 8, 10), 0)
-
     def run_download(self, *, precise=False, fail=False, stall=False, partial_timeout=False):
         clock = SimpleNamespace(now=0.0)
         requests = []

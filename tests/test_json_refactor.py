@@ -38,12 +38,27 @@ class JsonRefactorTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_default_config_is_json_and_masks_keys(self):
-        ApiStore.init_db()
+        ApiStore.load_config()
         self.assertTrue((Path(settings.DATA_DIR) / "config.json").exists())
         site = ApiStore.create_api_site({"id": "custom", "column_name": "Custom", "provider": "ipwhois", "url_template": "https://example.test/{ip}?key={key}", "api_key": "secret", "weight": 1, "enabled": False})
         self.assertTrue(site["api_key_configured"])
         self.assertNotIn("api_key", site)
         self.assertIn("secret", (Path(settings.DATA_DIR) / "config.json").read_text(encoding="utf-8"))
+
+    def test_subscription_list_and_detail_share_response_fields(self):
+        sub = ApiStore.create_subscription("https://summary.test/sub", "Summary")
+        with TestClient(app) as client:
+            for nodes in ([], [node(10), node(20, valid=False)]):
+                with self.subTest(nodes=len(nodes)):
+                    if nodes:
+                        ApiStore.save_results(sub["id"], nodes)
+                    listed = client.get("/subscriptions").json()[0]
+                    detail = client.get(f"/subscriptions/{sub['id']}").json()
+                    self.assertEqual(listed, detail)
+                    self.assertEqual(detail["node_count"], len(nodes))
+                    self.assertEqual(detail["valid_count"], sum(n.analyzed_node.is_valid for n in nodes))
+                    self.assertEqual(set(detail), {"id", "name", "url", "last_status", "node_count",
+                                                   "valid_count", "updated_at", "last_job_id"})
 
     def test_site_crud_key_clear_and_snapshot(self):
         site = ApiStore.create_api_site({"id": "custom", "column_name": "Custom", "provider": "ipwhois", "url_template": "https://example.test/{ip}", "api_key": "secret", "weight": 2, "enabled": False})
@@ -132,28 +147,28 @@ class JsonRefactorTests(unittest.TestCase):
             ApiStore.update_api_site("disabled-key", {"enabled": True})
 
     def test_corrupt_config_is_preserved_and_reported(self):
-        ApiStore.init_db()
+        ApiStore.load_config()
         config = Path(settings.DATA_DIR) / "config.json"
         for contents in ("{not json", "[]", "null"):
             with self.subTest(contents=contents):
                 config.write_text(contents, encoding="utf-8")
                 with self.assertRaises(ValueError):
-                    ApiStore.init_db()
+                    ApiStore.load_config()
                 with self.assertRaises(ValueError):
                     ApiStore.get_api_sites(public=False)
                 self.assertEqual(config.read_text(encoding="utf-8"), contents)
 
     def test_unreadable_config_is_not_replaced(self):
-        ApiStore.init_db()
-        config = ApiStore.config_path()
+        ApiStore.load_config()
+        config = (Path(settings.DATA_DIR) / "config.json")
         before = config.read_bytes()
         with patch.object(Path, "open", side_effect=PermissionError("unreadable")):
             with self.assertRaises(PermissionError):
-                ApiStore.init_db()
+                ApiStore.load_config()
         self.assertEqual(config.read_bytes(), before)
 
     def test_atomic_write_failure_preserves_previous_config(self):
-        ApiStore.init_db()
+        ApiStore.load_config()
         config = Path(settings.DATA_DIR) / "config.json"
         previous = config.read_text(encoding="utf-8")
         with patch("module_api_store.os.replace", side_effect=OSError("simulated interruption")):
@@ -161,6 +176,28 @@ class JsonRefactorTests(unittest.TestCase):
                 ApiStore.update_exit_ip_endpoint("https://replacement.example.test")
         self.assertEqual(config.read_text(encoding="utf-8"), previous)
         self.assertFalse(list(Path(settings.DATA_DIR).glob("*.tmp")))
+
+    def test_atomic_write_serialization_and_flush_failures_leave_no_temp_file(self):
+        ApiStore.load_config()
+        config = (Path(settings.DATA_DIR) / "config.json")
+        previous = config.read_bytes()
+        with self.assertRaises(TypeError):
+            ApiStore._atomic_write(config, {"unsupported": object()})
+        self.assertEqual(config.read_bytes(), previous)
+        self.assertFalse(list(config.parent.glob("*.tmp")))
+        with patch("module_api_store.os.fsync", side_effect=OSError("disk failure")):
+            with self.assertRaises(OSError):
+                ApiStore._atomic_write(config, {"replacement": True})
+        self.assertEqual(config.read_bytes(), previous)
+        self.assertFalse(list(config.parent.glob("*.tmp")))
+
+    def test_probe_snapshot_overrides_do_not_read_unused_config(self):
+        snapshot = {"api_sites": [], "exit_ip_endpoint": "https://snapshot.test"}
+        with patch.object(ApiStore, "load_config", side_effect=AssertionError("unexpected config read")):
+            self.assertIs(ApiStore.get_probe_config_snapshot(snapshot, [{"id": "ignored"}]), snapshot)
+        with patch.object(ApiStore, "get_exit_ip_endpoint", return_value="https://exit.test"):
+            self.assertEqual(ApiStore.get_probe_config_snapshot(api_sites=[]),
+                             {"api_sites": [], "exit_ip_endpoint": "https://exit.test"})
 
     def test_concurrent_config_job_and_result_writes_remain_readable(self):
         sub = ApiStore.create_subscription("https://concurrent.example.test/sub")
@@ -356,7 +393,7 @@ class JsonRefactorTests(unittest.TestCase):
     def test_frontend_root_and_routes_share_index_fallback(self):
         dist = Path(self.temp.name) / "dist"
         dist.mkdir()
-        with patch("api_server.frontend_dist_dir", return_value=dist), TestClient(app) as client:
+        with patch("api_server.FRONTEND_DIST_DIR", dist), TestClient(app) as client:
             for path in ("/", "/dashboard"):
                 self.assertEqual(client.get(path).status_code, 404)
             (dist / "index.html").write_text("frontend index", encoding="utf-8")

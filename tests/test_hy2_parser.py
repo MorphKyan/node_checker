@@ -112,7 +112,7 @@ class Hy2ParserTests(unittest.TestCase):
 
     def test_subscription_exporter_rewrite_hy2_remark(self):
         raw_uri = "hy2://pass@1.1.1.1:443?sni=example.com#Old_Remark"
-        new_uri = SubscriptionExporter.rewrite_vless_remark(raw_uri, "New_Remark_With_Info")
+        new_uri = SubscriptionExporter.rewrite_node_remark(raw_uri, "New_Remark_With_Info")
         self.assertEqual(new_uri, "hy2://pass@1.1.1.1:443?sni=example.com#New_Remark_With_Info")
 
     def test_json_codec_hy2_node(self):

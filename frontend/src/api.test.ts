@@ -220,13 +220,13 @@ describe("api client", () => {
     })));
 
     const client = createApiClient("");
-    await expect(client.getSubscription("missing")).rejects.toThrow("Subscription not found");
+    await expect(client.getResults("missing")).rejects.toThrow("Subscription not found");
 
     vi.stubGlobal("fetch", vi.fn(async () => new Response("upstream failed", {
       status: 500,
       statusText: "Server Error",
     })));
-    await expect(client.getSubscription("missing")).rejects.toThrow("upstream failed");
+    await expect(client.getResults("missing")).rejects.toThrow("upstream failed");
     vi.unstubAllGlobals();
   });
 });

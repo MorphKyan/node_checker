@@ -7,23 +7,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from module_api_presenter import build_detail_nodes, build_plain_subscription, normalize_job
-from module_api_store import ApiStore
+from module_api_presenter import build_detail_nodes, build_plain_subscription, normalize_job, normalize_subscription
+from module_api_store import API_PROVIDERS, ApiStore
 from module_runtime_settings import RuntimeSettings
 from module_subscription_exporter import SubscriptionExporter
 from module_subscription_service import SubscriptionRefreshService
-from module_singbox_exporter import generate_singbox_config, validate_singbox_template_content
+from module_singbox_exporter import generate_singbox_config, parse_singbox_template
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     RuntimeSettings.load()
-    ApiStore.init_db()
+    ApiStore.load_config()
     ApiStore.fail_stale_active_jobs("API server restarted before refresh completed")
     yield
 
 
-app = FastAPI(title="Vless Node Checker API", lifespan=lifespan)
+app = FastAPI(title="Node Checker API", lifespan=lifespan)
+FRONTEND_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -282,19 +283,7 @@ async def create_subscription(payload: SubscriptionCreateRequest) -> dict:
 
 @app.get("/subscriptions")
 async def list_subscriptions() -> list[dict]:
-    return [
-        {
-            "id": row["id"],
-            "name": row["name"],
-            "url": row["url"],
-            "last_status": row["last_status"],
-            "node_count": row["node_count"],
-            "valid_count": row["valid_count"],
-            "updated_at": row["updated_at"],
-            "last_job_id": row["last_job_id"],
-        }
-        for row in ApiStore.list_subscriptions()
-    ]
+    return [normalize_subscription(row) for row in ApiStore.list_subscriptions()]
 
 
 @app.get("/subscriptions/enhanced", response_class=PlainTextResponse)
@@ -391,16 +380,11 @@ async def get_singbox_subscription(
 async def get_subscription(subscription_id: str) -> dict:
     subscription = ensure_subscription(subscription_id)
     result = ApiStore.get_latest_result(subscription_id)
-    return {
-        "id": subscription["id"],
-        "name": subscription["name"],
-        "url": subscription["url"],
-        "last_status": subscription["last_status"],
+    return normalize_subscription({
+        **subscription,
         "node_count": result["node_count"] if result else 0,
         "valid_count": result["valid_count"] if result else 0,
-        "updated_at": subscription["updated_at"],
-        "last_job_id": subscription["last_job_id"],
-    }
+    })
 
 
 @app.patch("/subscriptions/{subscription_id}")
@@ -495,7 +479,7 @@ async def list_api_sites() -> dict:
 
 @app.get("/api-sites/providers")
 async def list_api_site_providers() -> list[str]:
-    return ApiStore.provider_types()
+    return API_PROVIDERS
 
 
 @app.post("/api-sites")
@@ -548,7 +532,7 @@ async def list_singbox_templates() -> list[dict]:
 @app.post("/singbox/templates")
 async def create_singbox_template(payload: SingboxTemplateCreateRequest) -> dict:
     try:
-        validate_singbox_template_content(payload.content)
+        parse_singbox_template(payload.content)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=f"Invalid Sing-box template content: {e}")
     return ApiStore.create_singbox_template(payload.name, payload.content)
@@ -569,7 +553,7 @@ async def update_singbox_template(template_id: str, payload: SingboxTemplateUpda
         raise HTTPException(status_code=422, detail="No fields to update")
     if "content" in data:
         try:
-            validate_singbox_template_content(data["content"])
+            parse_singbox_template(data["content"])
         except ValueError as e:
             raise HTTPException(status_code=422, detail=f"Invalid Sing-box template content: {e}")
     updated = ApiStore.update_singbox_template(template_id, **data)
@@ -585,18 +569,10 @@ async def delete_singbox_template(template_id: str) -> dict:
     return {"deleted": True, "template_id": template_id}
 
 
-def frontend_dist_dir() -> Path:
-    return Path(__file__).resolve().parent / "frontend" / "dist"
-
-
 @app.get("/")
-async def serve_frontend_root():
-    return await serve_frontend_asset_or_route("")
-
-
 @app.get("/{path:path}")
-async def serve_frontend_asset_or_route(path: str):
-    dist_dir = frontend_dist_dir()
+async def serve_frontend_asset_or_route(path: str = ""):
+    dist_dir = FRONTEND_DIST_DIR
     index_path = dist_dir / "index.html"
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="Frontend build not found")

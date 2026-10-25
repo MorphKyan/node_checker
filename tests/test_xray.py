@@ -3,15 +3,8 @@ import json
 import os
 from models import VlessNode
 from module_tunnel import TunnelController
-from settings import settings
 
 class XrayConfigTests(unittest.TestCase):
-    def setUp(self):
-        self.original_core = settings.PROXY_CORE
-        
-    def tearDown(self):
-        settings.PROXY_CORE = self.original_core
-
     def test_xray_config_generation_basic(self):
         node = VlessNode(
             raw_uri="vless://uuid@example.com:443?type=tcp#test",
@@ -23,8 +16,7 @@ class XrayConfigTests(unittest.TestCase):
             security="none",
             type="tcp"
         )
-        settings.PROXY_CORE = "xray"
-        config_path = TunnelController.generate_config(node, 10800)
+        config_path = TunnelController.generate_xray_config(node, 10800)
         
         self.assertTrue(os.path.exists(config_path))
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -56,8 +48,7 @@ class XrayConfigTests(unittest.TestCase):
             type="grpc",
             path="mygrpc"
         )
-        settings.PROXY_CORE = "xray"
-        config_path = TunnelController.generate_config(node, 10801)
+        config_path = TunnelController.generate_xray_config(node, 10801)
         
         self.assertTrue(os.path.exists(config_path))
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -89,8 +80,7 @@ class XrayConfigTests(unittest.TestCase):
             host="host.com",
             mode="auto"
         )
-        settings.PROXY_CORE = "xray"
-        config_path = TunnelController.generate_config(node, 10802)
+        config_path = TunnelController.generate_xray_config(node, 10802)
         
         self.assertTrue(os.path.exists(config_path))
         with open(config_path, 'r', encoding='utf-8') as f:

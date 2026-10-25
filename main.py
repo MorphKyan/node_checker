@@ -1,7 +1,7 @@
 import asyncio
 import os
 from settings import settings
-from module_setup import setup_singbox, setup_xray
+from module_setup import setup_core
 from module_parser import NodeParser
 from module_exporter import ResultExporter
 from module_subscription_exporter import SubscriptionExporter
@@ -10,7 +10,7 @@ from module_api_store import ApiStore
 
 
 async def main():
-    await asyncio.to_thread(setup_xray if settings.PROXY_CORE == "xray" else setup_singbox)
+    await asyncio.to_thread(setup_core)
     
     sub_url = input("Enter subscription URL or file path (leave empty for inputs/test.txt): ").strip()
     if not sub_url:

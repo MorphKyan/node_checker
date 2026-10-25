@@ -13,7 +13,7 @@ def strip_comments(json_str: str) -> str:
     return re.sub(pattern, lambda match: match.group(1) or " ", json_str, flags=re.DOTALL)
 
 
-def _parse_singbox_template(content: str) -> dict:
+def parse_singbox_template(content: str) -> dict:
     cleaned_json = strip_comments(content)
     try:
         template = json.loads(cleaned_json)
@@ -24,10 +24,6 @@ def _parse_singbox_template(content: str) -> dict:
         raise ValueError("Template must be a JSON object")
 
     return template
-
-
-def validate_singbox_template_content(content: str) -> None:
-    _parse_singbox_template(content)
 
 
 def generate_singbox_config(
@@ -41,7 +37,7 @@ def generate_singbox_config(
     Matches template outbounds by regex tags and appends node outbounds.
     """
     # 1. Clean and parse template
-    config = _parse_singbox_template(template_str)
+    config = parse_singbox_template(template_str)
 
     # 2. Sort and build remark tags for the tested nodes
     sorted_nodes = SubscriptionExporter.sort_nodes(tested_nodes, valid_only=False)

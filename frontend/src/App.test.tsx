@@ -13,7 +13,7 @@ describe("App", () => {
   });
 
   it("combines node filters, resets pagination and copies each URI format", async () => {
-    localStorage.setItem("vless-node-checker.preferences", JSON.stringify({ ...defaultPreferences, pageSize: 1 }));
+    localStorage.setItem("node-checker.preferences", JSON.stringify({ ...defaultPreferences, pageSize: 1 }));
     vi.stubGlobal("fetch", vi.fn(async () => new Response("[]", { headers: { "content-type": "application/json" } })));
     const node: NodeResult = {
       fingerprint: "jp", original_name: "JP node", enhanced_name_compact: "compact JP", enhanced_name_detailed: "detailed JP",
@@ -92,7 +92,7 @@ describe("App", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("VLESS 订阅运维控制台")).toBeInTheDocument();
+    expect(await screen.findByText("多协议节点分析控制台")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /订阅管理/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /暂停轮询|开启轮询/ })).not.toBeInTheDocument();
   });

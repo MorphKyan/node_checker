@@ -160,6 +160,23 @@ class AuditRegressionTests(unittest.TestCase):
 
 
 class AsyncAuditRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tunnel_start_uses_the_selected_core_config_and_command(self):
+        node = tested_node().analyzed_node.node
+        for core, command in (("sing-box", ["sing-box", "run", "-c", "core.json"]),
+                              ("xray", ["xray", "-c", "core.json"])):
+            process = MagicMock()
+            with self.subTest(core=core), \
+                 patch.object(settings, "PROXY_CORE", core), \
+                 patch.object(settings, "TUNNEL_START_DELAY", 0), \
+                 patch.object(TunnelController, "generate_singbox_config", return_value="core.json") as singbox, \
+                 patch.object(TunnelController, "generate_xray_config", return_value="core.json") as xray, \
+                 patch("module_tunnel.os.path.exists", return_value=False), \
+                 patch("module_tunnel.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn:
+                self.assertEqual(await TunnelController.start_tunnel(node, 10001), (process, "core.json"))
+                self.assertEqual(spawn.await_args.args, tuple(command))
+                (xray if core == "xray" else singbox).assert_called_once_with(node, 10001)
+                (singbox if core == "xray" else xray).assert_not_called()
+
     async def test_exit_failure_and_bad_metadata_do_not_erase_ttfb(self):
         node = tested_node().analyzed_node.node
         site = {"id": "ipapi", "provider": "ipapi", "enabled": True}
@@ -196,7 +213,8 @@ class AsyncAuditRegressionTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory, "config.json")
             path.write_text("secret", encoding="utf-8")
-            with patch.object(TunnelController, "generate_config", return_value=str(path)), \
+            with patch.object(settings, "PROXY_CORE", "sing-box"), \
+                 patch.object(TunnelController, "generate_singbox_config", return_value=str(path)), \
                  patch("module_tunnel.asyncio.create_subprocess_exec", side_effect=spawn), \
                  patch.object(settings, "TUNNEL_START_DELAY", 60):
                 task = asyncio.create_task(TunnelController.start_tunnel(tested_node().analyzed_node.node, 10001))

@@ -37,7 +37,7 @@ import { ApiError, createApiClient, enhancedUrl } from "./api";
 import type { ApiClient } from "./api";
 import { useAppData } from "./appData";
 import { duration, formatTime, groupCount, riskBuckets, statusTone, stripComments } from "./appUtils";
-import { filterNodes, type NodeFilters } from "./nodeFilters";
+import { filterNodes, sortNodes, type NodeFilters, type NodeSort, type NodeSortKey } from "./nodeFilters";
 import { defaultPreferences, isExportFormat, isExportMode, loadPreferences, savePreferences } from "./preferences";
 import type {
   ApiVerdict,
@@ -121,6 +121,7 @@ export default function App() {
     maxTtfb: "", maxRisk: "", minSpeed: "", detourFilter: "all", backboneFilter: "all",
   });
   const [page, setPage] = useState(1);
+  const [nodeSort, setNodeSort] = useState<NodeSort | null>(null);
   const [detailsNode, setDetailsNode] = useState<NodeResult | null>(null);
   const [exportMode, setExportMode] = useState<ExportMode>(preferences.defaultExportMode);
   const [exportFormat, setExportFormat] = useState<ExportFormat>(preferences.defaultExportFormat);
@@ -160,8 +161,8 @@ export default function App() {
   const maxSpeed = allNodes.reduce((max, node) => Math.max(max, node.download_speed_mbps || 0), 0);
 
   const filteredNodes = useMemo(
-    () => filterNodes(selectedResult?.nodes || [], nodeFilters),
-    [selectedResult, nodeFilters],
+    () => sortNodes(filterNodes(selectedResult?.nodes || [], nodeFilters), nodeSort),
+    [selectedResult, nodeFilters, nodeSort],
   );
 
   const totalPages = Math.max(1, Math.ceil(filteredNodes.length / preferences.pageSize));
@@ -324,9 +325,6 @@ export default function App() {
               <RefreshCw className="h-4 w-4" />
               刷新数据
             </Button>
-            <Button variant={preferences.autoRefresh ? "primary" : "secondary"} onClick={() => setPreferences({ ...preferences, autoRefresh: !preferences.autoRefresh })}>
-              {preferences.autoRefresh ? "暂停轮询" : "开启轮询"}
-            </Button>
           </div>
         </header>
 
@@ -387,6 +385,11 @@ export default function App() {
               sites={apiSites.data?.sites}
               filteredNodes={filteredNodes}
               pagedNodes={pagedNodes}
+              sort={nodeSort}
+              onSort={(key) => {
+                setNodeSort({ key, direction: nodeSort?.key === key && nodeSort.direction === "asc" ? "desc" : "asc" });
+                setPage(1);
+              }}
               page={page}
               totalPages={totalPages}
               pageSize={preferences.pageSize}
@@ -672,6 +675,8 @@ export function NodesView(props: {
   sites?: ApiSite[];
   filteredNodes: NodeResult[];
   pagedNodes: NodeResult[];
+  sort: NodeSort | null;
+  onSort: (key: NodeSortKey) => void;
   page: number;
   totalPages: number;
   pageSize: number;
@@ -687,6 +692,11 @@ export function NodesView(props: {
   const [copiedKey, setCopiedKey] = useState("");
   const [activeCopyDropdown, setActiveCopyDropdown] = useState<string | null>(null);
   const visibleSites = (props.sites ?? props.result?.api_sites_snapshot ?? []).filter((site) => site.enabled);
+  const columns: Array<[NodeSortKey, string]> = [
+    ["name", "原始名称"], ["status", "状态"], ["geo", "地区"], ["ping", "Ping"],
+    ["ttfb", "TTFB"], ["risk", "风险"], ["speed", "测速"], ["asn", "ASN"],
+    ...visibleSites.map((site): [NodeSortKey, string] => [`site:${site.id}`, site.column_name]),
+  ];
 
   useEffect(() => {
     function handleOutsideClick() {
@@ -718,7 +728,7 @@ export function NodesView(props: {
           </div>
           <div>
             <Label>搜索</Label>
-            <Input className="mt-1" value={props.filters.nodeSearch} onChange={(event) => props.onFilters({ nodeSearch: event.target.value })} placeholder="名称/IP/ASN" />
+            <Input className="mt-1" value={props.filters.nodeSearch} onChange={(event) => props.onFilters({ nodeSearch: event.target.value })} placeholder="搜索原始名称" />
           </div>
           <FilterSelect label="状态" value={props.filters.nodeValidity} onChange={(value) => props.onFilters({ nodeValidity: value })} options={[["all", "全部"], ["valid", "有效"], ["invalid", "失败"]]} />
           <FilterSelect label="地区" value={props.filters.nodeGeo} onChange={(value) => props.onFilters({ nodeGeo: value })} options={[["all", "全部"], ...props.geoOptions.map((item) => [item, item] as [string, string])]} />
@@ -742,15 +752,13 @@ export function NodesView(props: {
             <table className="w-full min-w-[1280px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-3 py-2">原始名称</th>
-                  <th className="px-3 py-2">状态</th>
-                  <th className="px-3 py-2">地区</th>
-                  <th className="px-3 py-2">Ping</th>
-                  <th className="px-3 py-2">TTFB</th>
-                  <th className="px-3 py-2">风险</th>
-                  <th className="px-3 py-2">测速</th>
-                  <th className="px-3 py-2">ASN</th>
-                  {visibleSites.map((site) => <th key={site.id} className="px-3 py-2">{site.column_name}</th>)}
+                  {columns.map(([key, label]) => (
+                    <th key={key} className="px-3 py-2" aria-sort={props.sort?.key === key ? (props.sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+                      <button type="button" className="flex w-full items-center gap-1 text-left hover:text-blue-600 focus-visible:outline-blue-600" onClick={() => props.onSort(key)} title={key.startsWith("site:") ? "按站点风险分数排序" : undefined}>
+                        {label}<span aria-hidden="true">{props.sort?.key === key ? (props.sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+                      </button>
+                    </th>
+                  ))}
                   <th className="px-3 py-2">操作</th>
                 </tr>
               </thead>

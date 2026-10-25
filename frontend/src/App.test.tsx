@@ -29,7 +29,13 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "节点详情" }));
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     expect(screen.getByText("US node")).toBeInTheDocument();
-    const search = screen.getByPlaceholderText("名称/IP/ASN");
+    fireEvent.click(screen.getByRole("button", { name: "原始名称" }));
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("JP node")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "原始名称" }));
+    expect(screen.getByText("US node")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "原始名称" })).toHaveAttribute("aria-sort", "descending");
+    const search = screen.getByPlaceholderText("搜索原始名称");
     fireEvent.change(search, { target: { value: "JP node" } });
     expect(screen.getByText("JP node")).toBeInTheDocument();
     expect(screen.getByText("1 / 1")).toBeInTheDocument();
@@ -88,6 +94,7 @@ describe("App", () => {
 
     expect(await screen.findByText("VLESS 订阅运维控制台")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /订阅管理/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /暂停轮询|开启轮询/ })).not.toBeInTheDocument();
   });
 
   it("shows mutation errors", async () => {
@@ -284,8 +291,8 @@ describe("App", () => {
     const result: SubscriptionResults = { subscription_id: "sub", status: "completed", subscription_status: "completed", node_count: 1, valid_count: 1, updated_at: 1, nodes: [node], api_sites_snapshot: [{ id: "one", column_name: "One", provider: "ipwhois", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 0, api_key_configured: false }, { id: "two", column_name: "Two", provider: "ipapi", url_template: "https://x/{ip}", weight: 1, enabled: true, order: 1, api_key_configured: false }] };
     const sites = result.api_sites_snapshot.map((site) => ({ ...site, enabled: !disabledIds.includes(site.id) }));
     if (!current) result.api_sites_snapshot = sites;
-    render(<NodesView subscriptions={[]} selectedId="sub" result={result} sites={current ? sites : undefined} filteredNodes={[node]} pagedNodes={[node]} page={1} totalPages={1} pageSize={20} geoOptions={[]} networkOptions={[]} typeOptions={[]} filters={{ nodeSearch: "", nodeValidity: "all", nodeGeo: "all", nodeNetwork: "all", nodeType: "all", maxRisk: "", maxTtfb: "", minSpeed: "", detourFilter: "all", backboneFilter: "all" }} onSelectSubscription={() => {}} onFilters={() => {}} onPage={() => {}} onDetails={() => {}} />);
-    const headers = screen.getAllByRole("columnheader").map((header) => header.textContent);
+    render(<NodesView subscriptions={[]} selectedId="sub" result={result} sites={current ? sites : undefined} filteredNodes={[node]} pagedNodes={[node]} sort={null} onSort={() => {}} page={1} totalPages={1} pageSize={20} geoOptions={[]} networkOptions={[]} typeOptions={[]} filters={{ nodeSearch: "", nodeValidity: "all", nodeGeo: "all", nodeNetwork: "all", nodeType: "all", maxRisk: "", maxTtfb: "", minSpeed: "", detourFilter: "all", backboneFilter: "all" }} onSelectSubscription={() => {}} onFilters={() => {}} onPage={() => {}} onDetails={() => {}} />);
+    const headers = screen.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[↕↑↓]$/, ""));
     expect(headers).not.toContain("增强名称");
     expect(screen.queryByText("compact node")).not.toBeInTheDocument();
     expect(headers.slice(8, -1)).toEqual([...(disabledIds.includes("one") ? [] : ["One"]), ...(disabledIds.includes("two") ? [] : ["Two"])]);

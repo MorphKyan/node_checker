@@ -1,5 +1,37 @@
 import type { NodeResult } from "./types";
 
+export type NodeSortKey = "name" | "status" | "geo" | "ping" | "ttfb" | "risk" | "speed" | "asn" | `site:${string}`;
+export interface NodeSort { key: NodeSortKey; direction: "asc" | "desc" }
+
+export function sortNodes(nodes: NodeResult[], sort: NodeSort | null): NodeResult[] {
+  if (!sort) return nodes;
+  const { key, direction } = sort;
+  function value(node: NodeResult): string | number | null {
+    switch (key) {
+      case "name": return node.original_name;
+      case "status": return node.is_valid ? 1 : 0;
+      case "geo": return node.probe.actual_geo || null;
+      case "ping": return node.probe.tcp_ping_ms;
+      case "ttfb": return node.probe.ttfb_ms;
+      case "risk": return node.probe.risk_score;
+      case "speed": return node.download_speed_mbps;
+      case "asn": return node.probe.asn_org || null;
+      default: {
+        const verdict = node.probe.evidence.find((item) => item.site_id === key.slice(5));
+        return verdict?.status === "success" ? verdict.risk_score : null;
+      }
+    }
+  }
+  return [...nodes].sort((a, b) => {
+    const left = value(a), right = value(b);
+    if (left === null) return right === null ? 0 : 1;
+    if (right === null) return -1;
+    const comparison = typeof left === "number" && typeof right === "number"
+      ? left - right : String(left).localeCompare(String(right), "zh-CN", { numeric: true });
+    return direction === "asc" ? comparison : -comparison;
+  });
+}
+
 export interface NodeFilters {
   nodeSearch: string;
   nodeValidity: string;
@@ -16,8 +48,7 @@ export interface NodeFilters {
 export function filterNodes(nodes: NodeResult[], filters: NodeFilters): NodeResult[] {
   const search = filters.nodeSearch.trim().toLowerCase();
   return nodes.filter((node) => {
-    const searchableText = `${node.original_name} ${node.enhanced_name_compact} ${node.probe.actual_ip} ${node.probe.asn_org}`.toLowerCase();
-    if (search && !searchableText.includes(search)) return false;
+    if (search && !node.original_name.toLowerCase().includes(search)) return false;
     if (filters.nodeValidity === "valid" && !node.is_valid) return false;
     if (filters.nodeValidity === "invalid" && node.is_valid) return false;
     if (filters.nodeGeo !== "all" && node.probe.actual_geo !== filters.nodeGeo) return false;

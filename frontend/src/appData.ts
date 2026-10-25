@@ -6,7 +6,7 @@ export function useAppData(api: ApiClient, preferences: LocalPreferences) {
   const subscriptions = useQuery({
     queryKey: ["subscriptions", preferences.apiBaseUrl],
     queryFn: api.listSubscriptions,
-    refetchInterval: preferences.autoRefresh ? 15_000 : false,
+    refetchInterval: preferences.autoRefresh ? 3_000 : false,
   });
 
   const results = useQueries({
@@ -21,7 +21,7 @@ export function useAppData(api: ApiClient, preferences: LocalPreferences) {
         }
       },
       enabled: Boolean(subscription.id),
-      refetchInterval: preferences.autoRefresh ? 15_000 : false,
+      refetchInterval: preferences.autoRefresh ? 3_000 : false,
     })),
   });
 
@@ -35,7 +35,7 @@ export function useAppData(api: ApiClient, preferences: LocalPreferences) {
       refetchInterval: (query: { state: { data?: JobStatus } }) => {
         if (!preferences.autoRefresh) return false;
         const status = query.state.data?.status;
-        return status === "queued" || status === "running" ? 2_000 : false;
+        return status === "queued" || status === "running" ? 3_000 : false;
       },
     })),
   });

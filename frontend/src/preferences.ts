@@ -14,14 +14,20 @@ export function loadPreferences(): LocalPreferences {
   try {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return defaultPreferences;
-    return { ...defaultPreferences, ...JSON.parse(raw) };
+    const stored = JSON.parse(raw);
+    const preferences = { ...defaultPreferences, ...stored };
+    if (stored.autoRefreshVersion !== 1) {
+      preferences.autoRefresh = true;
+      savePreferences(preferences);
+    }
+    return preferences;
   } catch {
     return defaultPreferences;
   }
 }
 
 export function savePreferences(preferences: LocalPreferences): void {
-  localStorage.setItem(storageKey, JSON.stringify(preferences));
+  localStorage.setItem(storageKey, JSON.stringify({ ...preferences, autoRefreshVersion: 1 }));
 }
 
 export function isExportMode(value: string): value is ExportMode {

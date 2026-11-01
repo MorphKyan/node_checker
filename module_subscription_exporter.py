@@ -4,7 +4,7 @@ import urllib.parse
 import unicodedata
 
 from models import LabelEvidence, TestedNode
-from module_profile import DISPLAY_LABELS
+from module_profile import display_label_names
 
 
 COUNTRY_FLAGS = {
@@ -58,11 +58,7 @@ def truncate_visual(s: str, max_width: int) -> str:
 class SubscriptionExporter:
     @staticmethod
     def format_labels(labels: list[LabelEvidence], fallback: str) -> str:
-        display = [
-            DISPLAY_LABELS.get(item.label, item.label)
-            for item in labels
-            if item.label != "unknown"
-        ]
+        display = display_label_names(labels)
         return "/".join(display) if display else fallback
 
     @staticmethod

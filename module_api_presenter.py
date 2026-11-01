@@ -2,6 +2,7 @@ from typing import Literal
 
 from models import TestedNode
 from module_node_identity import make_node_fingerprint
+from module_profile import DISPLAY_LABELS, display_label_names
 from module_subscription_exporter import SubscriptionExporter
 from settings import settings
 
@@ -49,7 +50,6 @@ def build_subscription(
 
 
 def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
-    from module_profile import DISPLAY_LABELS
     sorted_nodes = SubscriptionExporter.sort_nodes(nodes, valid_only=False)
     compact_names = SubscriptionExporter.build_names(
         sorted_nodes, "compact",
@@ -88,14 +88,8 @@ def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:
                     "ipv6_support": probe.ipv6_support,
                     "actual_ipv6": probe.actual_ipv6,
                     "risk_score": profile.risk_score,
-                    "network_labels": [
-                        SubscriptionExporter.format_labels([label], "")
-                        for label in profile.network_labels
-                    ],
-                    "type_labels": [
-                        SubscriptionExporter.format_labels([label], "")
-                        for label in profile.risk_labels
-                    ],
+                    "network_labels": display_label_names(profile.network_labels),
+                    "type_labels": display_label_names(profile.risk_labels),
                     "confidence": profile.confidence,
                     "is_detour": probe.is_detour,
                     "is_backbone": probe.is_backbone,

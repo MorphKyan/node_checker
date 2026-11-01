@@ -89,6 +89,17 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(len(paths), 1)
         self.assertLessEqual(len(paths[0].name.encode("utf-8")), 255)
 
+    def test_report_table_escapes_remark_separators_and_line_breaks(self):
+        node = sample_node()
+        node.remark = "JP | <premium>\r\nsecond line"
+        item = TestedNode(AnalyzedNode(node, ProbeData(1, 2, "", "JP", ""), True))
+        ResultExporter.export_markdown_report([item], settings.DATA_DIR)
+        report = Path(settings.DATA_DIR, "report.md").read_text(encoding="utf-8")
+        rows = [line for line in report.splitlines() if line.startswith("| ")]
+        self.assertEqual(len(rows), 2)
+        self.assertIn("JP &#124; &lt;premium&gt;<br>second line", rows[1])
+        self.assertEqual(rows[0].count("|"), rows[1].count("|"))
+
     def test_canceled_job_is_removed_from_task_registry_when_it_starts(self):
         async def run():
             sub = ApiStore.create_subscription("https://example.test/sub")
@@ -119,6 +130,52 @@ class PersistenceTests(unittest.TestCase):
 
 
 class AsyncMaintenanceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shutdown_waits_for_previously_canceled_job_without_canceling_cleanup_again(self):
+        started, cleaning, release, stopped = (asyncio.Event() for _ in range(4))
+
+        async def refresh(*args, **kwargs):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+                stopped.set()
+
+        async def finish_cleanup():
+            await cleaning.wait()
+            await asyncio.sleep(0)
+            release.set()
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory), \
+             patch.object(SubscriptionRefreshService, "run_subscription_refresh", side_effect=refresh):
+            try:
+                async with lifespan(app):
+                    sub = ApiStore.create_subscription("https://example.test/sub")
+                    job = SubscriptionRefreshService.schedule_refresh(sub["id"])
+                    task = SubscriptionRefreshService._running_tasks[job["id"]]
+                    await started.wait()
+                    SubscriptionRefreshService.cancel_refresh(job["id"])
+                    await cleaning.wait()
+                    SubscriptionRefreshService.cancel_refresh(job["id"])
+                    finisher = asyncio.create_task(finish_cleanup())
+                self.assertTrue(stopped.is_set(), "shutdown returned before canceled job cleanup finished")
+                self.assertTrue(task.done())
+                await finisher
+            finally:
+                release.set()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_cancel_before_job_starts_eventually_removes_registry_entry(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory):
+            sub = ApiStore.create_subscription("https://example.test/sub")
+            job = SubscriptionRefreshService.schedule_refresh(sub["id"])
+            task = SubscriptionRefreshService._running_tasks[job["id"]]
+            SubscriptionRefreshService.cancel_refresh(job["id"])
+            await asyncio.gather(task, return_exceptions=True)
+            self.assertNotIn(job["id"], SubscriptionRefreshService._running_tasks)
+            self.assertEqual(ApiStore.get_job(job["id"])["status"], "canceled")
+
     async def test_server_shutdown_waits_for_running_job_cleanup(self):
         started, stopped = asyncio.Event(), asyncio.Event()
 

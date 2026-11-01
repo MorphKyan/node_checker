@@ -50,6 +50,15 @@ class NodeParserTests(unittest.TestCase):
         self.assertTrue("-" in encoded or "_" in encoded)
         self.assertEqual(NodeParser.parse_nodes(encoded), NodeParser.parse_nodes(raw))
 
+    def test_wrapped_unpadded_base64_and_utf8_bom_subscriptions(self):
+        for suffix in ("", "1", "12"):
+            raw = "vless://uuid@example.com:443#JP" + suffix
+            encoded = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+            for source in (encoded[:10] + "\n" + encoded[10:], "\ufeff" + raw,
+                           "\ufeff" + encoded[:10] + "\r\n " + encoded[10:]):
+                with self.subTest(source=source):
+                    self.assertEqual(NodeParser.parse_nodes(source), NodeParser.parse_nodes(raw))
+
     def test_invalid_nodes_do_not_log_credentials(self):
         output = StringIO()
         with redirect_stdout(output):

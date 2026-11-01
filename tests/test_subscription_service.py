@@ -38,6 +38,14 @@ def make_analyzed_node(node: VlessNode, risk: float = 10.0, actual_geo: str | No
 
 
 class SubscriptionRefreshServiceTests(unittest.TestCase):
+    def test_local_file_can_contain_a_bom_prefixed_uppercase_subscription_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "sub.txt")
+            source.write_text("\ufeffHTTP://example.test/sub\n", encoding="utf-8")
+            with patch("module_subscription_service.NodeParser.fetch_subscription", return_value="nodes") as fetch:
+                self.assertEqual(asyncio.run(SubscriptionRefreshService.fetch_subscription_text(str(source))), "nodes")
+                fetch.assert_awaited_once_with("HTTP://example.test/sub")
+
     def test_speed_refresh_uses_saved_nodes_without_fetching_and_respects_limit(self):
         analyzed = [make_analyzed_node(make_node(i, geo)) for i, geo in enumerate(["JP", "JP", "US", "US"])]
         analyzed[-1].is_valid = False

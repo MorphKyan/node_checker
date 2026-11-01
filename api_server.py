@@ -25,8 +25,8 @@ async def lifespan(app: FastAPI):
     finally:
         tasks = list(SubscriptionRefreshService._running_tasks.items())
         for job_id, task in tasks:
-            SubscriptionRefreshService._running_tasks.pop(job_id, None)
-            task.cancel()
+            if not task.cancelling():
+                task.cancel()
         await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
         for job_id, _ in tasks:
             ApiStore.cancel_job(job_id, "API server stopped before refresh completed")

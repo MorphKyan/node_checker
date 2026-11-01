@@ -1,5 +1,6 @@
 import os
 import re
+from html import escape
 from pathlib import Path
 from models import TestedNode, Hy2Node, SsNode
 from module_node_identity import make_node_fingerprint
@@ -53,7 +54,15 @@ class ResultExporter:
                 "Unknown" if probe.is_backbone is None else "Yes" if probe.is_backbone else "No",
                 risk_display, str(an.reject_reason)
             ])
-            
+
+        # Keep upstream remarks and labels inside their Markdown table cells.
+        rows = [
+            [escape(value, quote=False).replace("|", "&#124;")
+             .replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+             for value in row]
+            for row in rows
+        ]
+
         widths = [get_visual_width(h) for h in headers]
         for row in rows:
             for i, col in enumerate(row):

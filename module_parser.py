@@ -171,9 +171,10 @@ class NodeParser:
 
     @staticmethod
     def parse_nodes(raw_text: str) -> list[ProxyNode]:
-        raw_text = raw_text.strip()
+        raw_text = raw_text.strip().lstrip("\ufeff")
         try:
-            decoded = base64.b64decode(raw_text + "=" * (-len(raw_text) % 4), altchars=b"-_").decode('utf-8')
+            encoded = "".join(raw_text.split())
+            decoded = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_").decode('utf-8-sig')
         except ValueError:
             decoded = raw_text
 

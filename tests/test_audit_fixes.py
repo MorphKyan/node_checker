@@ -141,17 +141,14 @@ class AsyncAuditFixTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(await ProbeCache.get(item.node, probe_config=config))
                 self.assertEqual(list(Path(directory).rglob("*.json")), [])
 
-    async def test_cache_signature_is_checked_after_waiting_for_writer(self):
+    async def test_delayed_cache_write_rejects_changed_runtime_settings(self):
         item = tested_node().analyzed_node
         config = {"api_sites": [], "exit_ip_endpoint": "https://exit.test"}
         with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory), \
-             patch.object(settings, "PROXY_CORE", "sing-box"), patch.object(settings, "CACHE_ENABLED", True), \
-             patch.object(ProbeCache, "_write_lock", asyncio.Lock()):
+             patch.object(settings, "PROXY_CORE", "sing-box"), patch.object(settings, "CACHE_ENABLED", True):
             signature = ProbeCache.config_signature(probe_config=config)
-            async with ProbeCache._write_lock:
-                task = asyncio.create_task(ProbeCache.set(item.node, item.probe, probe_config=config, expected_signature=signature))
-                await asyncio.sleep(0)
-                settings.PROXY_CORE = "xray"
+            task = asyncio.create_task(ProbeCache.set(item.node, item.probe, probe_config=config, expected_signature=signature))
+            settings.PROXY_CORE = "xray"
             await task
             self.assertEqual(list(Path(directory).rglob("*.json")), [])
 

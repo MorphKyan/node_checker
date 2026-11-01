@@ -66,6 +66,13 @@ COMPANY_TYPE_MAP = {
 }
 
 
+def display_label_names(labels: list[LabelEvidence]) -> list[str]:
+    return list(dict.fromkeys(
+        DISPLAY_LABELS.get(item.label, item.label)
+        for item in labels if item.label != "unknown"
+    ))
+
+
 def _label(label: str, confidence: float) -> LabelEvidence:
     return LabelEvidence(label, max(0.0, min(1.0, confidence)))
 
@@ -471,11 +478,7 @@ class NodeProfileAggregator:
             if primary.risk_labels:
                 risk_labels = list(primary.risk_labels)
 
-        display_labels = [
-            DISPLAY_LABELS[item.label]
-            for item in network_labels + risk_labels
-            if item.label != "unknown"
-        ] or ["未知"]
+        display_labels = display_label_names(network_labels + risk_labels) or ["未知"]
 
         top_confidence = max(
             [i.confidence for i in network_labels + risk_labels],

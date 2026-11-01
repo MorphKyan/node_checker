@@ -86,9 +86,9 @@ class SubscriptionRefreshService:
             max_bytes = max(1, int(settings.SUBSCRIPTION_MAX_M)) * 1024 * 1024
             if os.path.getsize(source) > max_bytes:
                 raise ValueError(f"Subscription file exceeds {max_bytes} bytes")
-            with open(source, "r", encoding="utf-8") as f:
+            with open(source, "r", encoding="utf-8-sig") as f:
                 raw_text = f.read().strip()
-            if raw_text.startswith("http") and "\n" not in raw_text:
+            if NodeParser.is_http_source(raw_text) and "\n" not in raw_text:
                 return await NodeParser.fetch_subscription(raw_text)
             return raw_text
         raise FileNotFoundError(f"Subscription source not found: {source}")
@@ -345,6 +345,8 @@ class SubscriptionRefreshService:
         try:
             task = asyncio.create_task(coro)
             cls._running_tasks[job["id"]] = task
+            # A task canceled before its first step never reaches run_job's finally.
+            task.add_done_callback(lambda _: cls._running_tasks.pop(job["id"], None))
         except RuntimeError as e:
             coro.close()
             ApiStore.update_job(
@@ -370,8 +372,8 @@ class SubscriptionRefreshService:
         if not job:
             return None
 
-        task = cls._running_tasks.pop(job_id, None)
-        if task and not task.done():
+        task = cls._running_tasks.get(job_id)
+        if task and not task.done() and not task.cancelling():
             task.cancel()
 
         canceled = ApiStore.cancel_job(job_id)

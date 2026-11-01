@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import json
 import time
@@ -14,8 +13,6 @@ from settings import settings
 
 
 class ProbeCache:
-    _write_lock = asyncio.Lock()
-
     @classmethod
     def config_signature(cls, api_sites=None, *, probe_config=None) -> str:
         snapshot = ApiStore.get_probe_config_snapshot(probe_config, api_sites)
@@ -51,7 +48,4 @@ class ProbeCache:
         if expected_signature is not None and expected_signature != signature:
             return
         value = {"fingerprint": make_node_fingerprint(node), "config_signature": signature, "created_at": int(time.time()), "expires_at": int(time.time()) + int(settings.PROBE_CACHE_TTL_SECONDS), "probe": asdict(probe_data)}
-        async with cls._write_lock:
-            if signature != cls.config_signature(probe_config=snapshot):
-                return
-            ApiStore._atomic_write(cls._path(node, signature), value)
+        ApiStore._atomic_write(cls._path(node, signature), value)

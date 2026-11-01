@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from api_server import app
 from module_api_store import ApiStore
 from module_subscription_exporter import SubscriptionExporter
+from module_profile import NodeProfileAggregator, ProfileAdapters
 import unittest
 from models import LabelEvidence, TestedNode, VlessNode, AnalyzedNode, NodeProfile, ProbeData
 from module_api_presenter import build_detail_nodes, build_subscription
@@ -62,6 +63,18 @@ def make_mock_tested_node(
     )
 
 class SubscriptionExporterTests(unittest.TestCase):
+    def test_display_aliases_are_unique_without_discarding_source_evidence(self):
+        tested = make_mock_tested_node("vless://uuid@example.test:443#JP", "JP", 10, 100, 15)
+        verdict = ProfileAdapters.from_netcoffee({"company_type": "hosting", "is_datacenter": True, "trust_score": 90})
+        profile = NodeProfileAggregator.aggregate([verdict], primary=verdict)
+        tested.analyzed_node.probe.profile = profile
+        self.assertEqual(profile.display_labels, ["机房"])
+        self.assertEqual(len(profile.evidence[0].network_labels), 2)
+        detail = build_detail_nodes([tested])[0]
+        self.assertEqual(detail["probe"]["network_labels"], ["机房"])
+        self.assertIn(" | 机房 | ", detail["enhanced_name_compact"])
+        self.assertNotIn("机房/机房", detail["enhanced_name_compact"])
+
     def test_detail_names_match_base64_subscription(self):
         nodes = [
             make_mock_tested_node(f"vless://{index}@ex.com:443?type=tcp#old", "重复节点" * 20,

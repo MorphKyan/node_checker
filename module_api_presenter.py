@@ -28,7 +28,7 @@ def normalize_job(row: dict) -> dict:
     }
 
 
-def build_plain_subscription(
+def build_subscription(
     nodes: list[TestedNode],
     *,
     mode: Literal["compact", "detailed"],
@@ -45,8 +45,7 @@ def build_plain_subscription(
         max_length,
         valid_only=valid_only,
     )
-    content = "\n".join(uris)
-    return content + "\n" if content else ""
+    return SubscriptionExporter.encode_subscription(uris)
 
 
 def build_detail_nodes(nodes: list[TestedNode]) -> list[dict]:

@@ -10,7 +10,6 @@ from module_parser import NodeParser
 from module_node_identity import make_node_fingerprint
 from module_result_codec import restore_proxy_node, restore_tested_nodes
 from module_shadowsocks import singbox_shadowsocks_outbound
-from module_singbox_exporter import generate_singbox_config
 from module_subscription_exporter import SubscriptionExporter
 from module_tunnel import TunnelController
 from module_exporter import ResultExporter
@@ -97,16 +96,9 @@ class ShadowsocksTests(unittest.TestCase):
                         {'plugin': 'obfs-local'}, {'plugin_opts': 'obfs=tls'}]:
             self.assertNotEqual(make_node_fingerprint(self.node), make_node_fingerprint(replace(self.node, **changes)))
 
-    def test_export_retains_uri_and_singbox_connection_settings(self):
+    def test_export_retains_uri_connection_settings(self):
         uri = SubscriptionExporter.build_uris([self.tested], 'compact', 64)[0]
         self.assertEqual(uri.split('#')[0], self.uri.split('#')[0])
-        config = generate_singbox_config('{"outbounds": [{"type": "selector", "tag": "proxy", "use_all_nodes": true}]}', [self.tested])
-        outbound = config['outbounds'][-1]
-        self.assertEqual(outbound['type'], 'shadowsocks')
-        self.assertEqual(outbound['method'], self.node.method)
-        self.assertEqual(outbound['password'], self.node.password)
-        self.assertEqual(config['outbounds'][0]['outbounds'], [outbound['tag']])
-
     def test_report_has_ss_method(self):
         with tempfile.TemporaryDirectory() as folder:
             ResultExporter.export_markdown_report([self.tested], base_dir=folder)

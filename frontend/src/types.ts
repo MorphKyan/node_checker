@@ -1,7 +1,6 @@
 export type Status = "new" | "queued" | "running" | "completed" | "failed" | "canceled";
 export type Phase = "queued" | "fetch" | "filter" | "speedtest" | "completed" | "failed" | "canceled";
 export type ExportMode = "compact" | "detailed";
-export type ExportFormat = "base64" | "plain";
 
 export interface SubscriptionSummary {
   id: string;
@@ -43,7 +42,7 @@ export interface ApiVerdict {
   risk_labels: LabelEvidence[];
   risk_score: number | null;
   raw_summary: string;
-  raw_data?: { [key: string]: JsonValue } | null;
+  raw_data?: JsonValue;
 }
 
 export interface NodeProbe {
@@ -150,14 +149,5 @@ export interface LocalPreferences {
   apiBaseUrl: string;
   autoRefresh: boolean;
   defaultExportMode: ExportMode;
-  defaultExportFormat: ExportFormat;
   pageSize: number;
-}
-
-export interface SingboxTemplate {
-  id: string;
-  name: string;
-  content: string;
-  created_at: number;
-  updated_at: number;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createApiClient, enhancedUrl, singboxUrl } from "./api";
+import { createApiClient, enhancedUrl } from "./api";
 
 describe("api client", () => {
   it("lists subscriptions", async () => {
@@ -17,43 +17,16 @@ describe("api client", () => {
   });
 
   it("builds enhanced subscription URLs", () => {
-    expect(enhancedUrl("", "sub_1", { mode: "detailed", format: "plain", valid_only: false, limit: 20 })).toBe(
-      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub_1&mode=detailed&format=plain&valid_only=false&limit=20`,
+    expect(enhancedUrl("", "sub_1", { mode: "detailed", valid_only: false, limit: 20 })).toBe(
+      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub_1&mode=detailed&valid_only=false&limit=20`,
     );
-    expect(enhancedUrl("", ["sub_1", "sub_2"], { mode: "compact", format: "base64", valid_only: true })).toBe(
-      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub_1&subscription_id=sub_2&mode=compact&format=base64&valid_only=true`,
+    expect(enhancedUrl("", ["sub_1", "sub_2"], { mode: "compact", valid_only: true })).toBe(
+      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub_1&subscription_id=sub_2&mode=compact&valid_only=true`,
     );
   });
 
   it("copies absolute URLs using the configured API origin", () => {
-    expect(singboxUrl("", ["sub_1"])).toBe(`${window.location.origin}/subscriptions/singbox?subscription_id=sub_1`);
-    expect(singboxUrl("http://api.local/", ["sub_1"])).toBe("http://api.local/subscriptions/singbox?subscription_id=sub_1");
-    expect(enhancedUrl("http://api.local", "sub_1", { mode: "compact", format: "plain", valid_only: true })).toMatch(/^http:\/\/api.local\/subscriptions\/enhanced/);
-  });
-
-  it("uses the same sing-box options for preview requests and export URLs", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", {
-      headers: { "content-type": "application/json" },
-    })));
-    try {
-      for (const baseUrl of ["", "http://api.local/prefix/"]) {
-        const client = createApiClient(baseUrl);
-        const ids = ["sub/one", "sub two"];
-        const templateId = "template & one";
-        const params = { mode: "detailed", valid_only: false, limit: 1, max_risk: 0 };
-        await client.getSingboxExport(ids, templateId, params);
-        const requestUrl = vi.mocked(fetch).mock.calls.at(-1)![0];
-        const exportUrl = client.getSingboxExportUrl(ids, templateId, params);
-        expect(new URL(String(requestUrl), window.location.origin).href).toBe(exportUrl);
-        const query = new URL(exportUrl).searchParams;
-        expect(query.getAll("subscription_id")).toEqual(ids);
-        expect(query.get("template_id")).toBe(templateId);
-        expect(query.get("valid_only")).toBe("false");
-        expect(query.get("max_risk")).toBe("0");
-      }
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    expect(enhancedUrl("http://api.local", "sub_1", { mode: "compact", valid_only: true })).toMatch(/^http:\/\/api.local\/subscriptions\/enhanced/);
   });
 
   it("passes enhanced export limits to preview requests", async () => {
@@ -65,14 +38,14 @@ describe("api client", () => {
     const client = createApiClient("http://api.local");
     const result = await client.getEnhanced("sub_1", {
       mode: "compact",
-      format: "base64",
+
       valid_only: true,
       limit: 10,
     });
 
     expect(result).toBe("payload");
     expect(fetch).toHaveBeenCalledWith(
-      "http://api.local/subscriptions/enhanced?subscription_id=sub_1&mode=compact&format=base64&valid_only=true&limit=10",
+      "http://api.local/subscriptions/enhanced?subscription_id=sub_1&mode=compact&valid_only=true&limit=10",
       expect.any(Object),
     );
     vi.unstubAllGlobals();
@@ -87,13 +60,13 @@ describe("api client", () => {
     const client = createApiClient("http://api.local");
     const result = await client.getEnhanced(["sub_1", "sub_2"], {
       mode: "compact",
-      format: "base64",
+
       valid_only: true,
     });
 
     expect(result).toBe("payload");
     expect(fetch).toHaveBeenCalledWith(
-      "http://api.local/subscriptions/enhanced?subscription_id=sub_1&subscription_id=sub_2&mode=compact&format=base64&valid_only=true",
+      "http://api.local/subscriptions/enhanced?subscription_id=sub_1&subscription_id=sub_2&mode=compact&valid_only=true",
       expect.any(Object),
     );
     vi.unstubAllGlobals();
@@ -187,8 +160,8 @@ describe("api client", () => {
     await client.getResults("sub/with space");
 
     expect(fetch).toHaveBeenCalledWith("/subscriptions/sub%2Fwith%20space/results", expect.any(Object));
-    expect(enhancedUrl("", "sub/with space", { mode: "compact", format: "base64", valid_only: true })).toBe(
-      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub%2Fwith+space&mode=compact&format=base64&valid_only=true`,
+    expect(enhancedUrl("", "sub/with space", { mode: "compact", valid_only: true })).toBe(
+      `${window.location.origin}/subscriptions/enhanced?subscription_id=sub%2Fwith+space&mode=compact&valid_only=true`,
     );
     vi.unstubAllGlobals();
   });

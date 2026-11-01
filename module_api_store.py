@@ -70,7 +70,6 @@ class ApiStore:
             "exit_ip_endpoint": "https://ipwho.is/",
             "api_sites": deepcopy(DEFAULT_API_SITES),
             "subscriptions": [],
-            "singbox_templates": [],
         }
 
     @classmethod
@@ -85,6 +84,9 @@ class ApiStore:
                 cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
             if not isinstance(config, dict):
                 raise ValueError("config.json must contain a JSON object; file preserved")
+            if "singbox_templates" in config:
+                del config["singbox_templates"]
+                cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
             return {**cls._default_config(), **config}
 
     @classmethod
@@ -396,44 +398,3 @@ class ApiStore:
         try: data["nodes"] = restore_tested_nodes(data.get("nodes", []))
         except (TypeError, ValueError, KeyError): return None
         return data
-
-    @classmethod
-    def list_singbox_templates(cls) -> list[dict]:
-        return sorted(deepcopy(cls.load_config().get("singbox_templates", [])), key=lambda t: t.get("created_at", 0), reverse=True)
-
-    @classmethod
-    def get_singbox_template(cls, template_id: str) -> dict | None:
-        return next((t for t in cls.list_singbox_templates() if t.get("id") == template_id), None)
-
-    @classmethod
-    def create_singbox_template(cls, name: str, content: str) -> dict:
-        with cls._config_lock:
-            config = cls.load_config()
-            now = int(time.time())
-            tpl = {"id": f"tpl_{uuid.uuid4().hex[:12]}", "name": name, "content": content, "created_at": now, "updated_at": now}
-            config["singbox_templates"].append(tpl)
-            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
-            return deepcopy(tpl)
-
-    @classmethod
-    def update_singbox_template(cls, template_id: str, *, name: str | None = None, content: str | None = None) -> dict | None:
-        with cls._config_lock:
-            config = cls.load_config()
-            for tpl in config["singbox_templates"]:
-                if tpl["id"] == template_id:
-                    if name is not None: tpl["name"] = name
-                    if content is not None: tpl["content"] = content
-                    tpl["updated_at"] = int(time.time())
-                    cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
-                    return deepcopy(tpl)
-        return None
-
-    @classmethod
-    def delete_singbox_template(cls, template_id: str) -> bool:
-        with cls._config_lock:
-            config = cls.load_config()
-            old = config["singbox_templates"]
-            config["singbox_templates"] = [t for t in old if t["id"] != template_id]
-            if len(old) == len(config["singbox_templates"]): return False
-            cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
-            return True

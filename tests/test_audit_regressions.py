@@ -1,3 +1,4 @@
+import base64
 import asyncio
 import json
 import tempfile
@@ -20,7 +21,6 @@ from module_exporter import ResultExporter
 from module_node_identity import make_node_fingerprint
 from module_probe import LightweightProbe
 from module_profile import ProfileAdapters
-from module_singbox_exporter import generate_singbox_config
 from module_subscription_service import SubscriptionRefreshService
 from module_tunnel import TunnelController
 from settings import settings
@@ -65,10 +65,9 @@ class AuditRegressionTests(unittest.TestCase):
         with patch.object(settings, "PROXY_CORE", "xray"):
             self.assertNotEqual(first, ProbeCache.config_signature(probe_config=config))
 
-    def test_fixed_export_route_prefers_working_duplicate_in_both_formats(self):
+    def test_base64_export_prefers_working_duplicate(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory):
             with TestClient(app) as client:
-                ApiStore.create_singbox_template("test", '{"outbounds":[]}')
                 ids = []
                 for valid, risk in [(False, 0), (True, 60)]:
                     sub = ApiStore.create_subscription("https://subscription.test")
@@ -81,12 +80,11 @@ class AuditRegressionTests(unittest.TestCase):
                     ids.append(sub["id"])
                 for order in (ids, ids[::-1]):
                     params = [("subscription_id", id) for id in order]
-                    exported = client.get("/subscriptions/singbox", params=params)
-                    self.assertEqual(exported.status_code, 200, exported.text)
-                    self.assertEqual(sum(out.get("type") == "vless" for out in exported.json()["outbounds"]), 1)
-                    plain = client.get("/subscriptions/enhanced", params=params + [("format", "plain")])
-                    self.assertEqual(plain.status_code, 200)
-                    self.assertIn("vless://uuid@example.test:443#", plain.text)
+                    response = client.get("/subscriptions/enhanced", params=params)
+                    self.assertEqual(response.status_code, 200)
+                    uris = base64.b64decode(response.text, validate=True).decode().splitlines()
+                    self.assertEqual(len(uris), 1)
+                    self.assertTrue(uris[0].startswith("vless://uuid@example.test:443#"))
 
     def test_report_filenames_handle_ipv6_and_same_domain_suffix(self):
         items = [tested_node(server_ip=host) for host in ("2001:db8::1", "one.example.com", "two.example.com")]
@@ -100,34 +98,6 @@ class AuditRegressionTests(unittest.TestCase):
             report = Path(directory, "report.md").read_text(encoding="utf-8")
             self.assertIn("Unknown", report)
             self.assertLess(report.index("0.0"), report.index("20.0"))
-
-    def test_empty_selector_has_a_real_direct_outbound(self):
-        template = '{"outbounds":[{"type":"selector","tag":"proxy","use_all_nodes":true}]}'
-        config = generate_singbox_config(template, [])
-        self.assertEqual(config["outbounds"][0]["outbounds"], ["DIRECT"])
-        self.assertIn({"type": "direct", "tag": "DIRECT"}, config["outbounds"])
-
-    def test_probe_and_export_use_identical_protocol_settings(self):
-        base = tested_node().analyzed_node.node
-        nodes = [
-            replace(base, security="tls", alpn="h3, http/1.1", type="ws", path="/socket", host="edge.test"),
-            replace(base, security="reality", pbk="key", sid="id", fp="chrome", type="grpc"),
-            Hy2Node("hy2://pass@example.test", "example.test", 443, "hy2", "JP", password="pass", obfs="salamander", obfs_password="obfs"),
-            SsNode("ss://example.test", "example.test", 443, "ss", "JP", method="aes-128-gcm", password="pass"),
-        ]
-        for node in nodes:
-            with self.subTest(protocol=node.protocol):
-                item = tested_node()
-                item.analyzed_node.node = node
-                exported = generate_singbox_config('{"outbounds":[]}', [item])["outbounds"][0]
-                path = Path(TunnelController.generate_singbox_config(node, 10001))
-                try:
-                    probed = json.loads(path.read_text(encoding="utf-8"))["outbounds"][0]
-                finally:
-                    path.unlink()
-                exported.pop("tag")
-                probed.pop("tag")
-                self.assertEqual(probed, exported)
 
     def test_deployment_build_failure_preserves_running_service_and_reports_failure(self):
         ssh = MagicMock()

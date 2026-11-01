@@ -19,7 +19,6 @@ from module_cache import ProbeCache
 from module_node_identity import make_node_fingerprint
 from module_probe import LightweightProbe
 from module_setup import setup_core
-from module_singbox_exporter import generate_singbox_config, strip_comments
 from module_singbox_outbound import singbox_outbound
 from module_subscription_exporter import SubscriptionExporter, get_visual_width
 from module_subscription_service import SubscriptionRefreshService
@@ -35,8 +34,6 @@ class AuditFixTests(unittest.TestCase):
             with self.subTest(transport=transport):
                 with self.assertRaisesRegex(ValueError, transport):
                     TunnelController.generate_singbox_config(item.analyzed_node.node, 1080)
-                with self.assertRaisesRegex(ValueError, transport):
-                    generate_singbox_config('{"outbounds":[]}', [item])
 
     def test_hy2_hopping_ports_are_preserved_and_change_identity(self):
         node = Hy2Node("hy2://pass@example.test", "example.test", 443, "node", "JP", password="pass", ports="2000-3000, 4000")
@@ -63,21 +60,12 @@ class AuditFixTests(unittest.TestCase):
                 self.assertEqual(len(result), len(set(result)))
                 self.assertTrue(all(get_visual_width(name) <= width for name in result))
 
-    def test_comments_preserve_escaped_strings_and_token_boundaries(self):
-        value = {"path": "C:\\cache\\", "url": "https://example.test", "quote": '\\" /* keep */ // keep'}
-        content = "/* first\nsecond */\n" + json.dumps(value) + " // tail"
-        self.assertEqual(json.loads(strip_comments(content)), value)
-        with self.assertRaises(json.JSONDecodeError):
-            json.loads(strip_comments('{"value": 1/* comment */2}'))
-
     def test_null_updates_preserve_existing_values(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory), TestClient(app) as client:
             sub = ApiStore.create_subscription("https://subscription.test", "original")
-            template = ApiStore.create_singbox_template("template", '{"outbounds":[]}')
             original_settings = client.get("/settings").json()
             for url, payload in [
                 (f"/subscriptions/{sub['id']}", {"url": None, "name": None}),
-                (f"/singbox/templates/{template['id']}", {"content": None, "name": None}),
                 ("/settings", {"FILTER_CONCURRENCY": None, "CACHE_ENABLED": None}),
             ]:
                 with self.subTest(url=url):
@@ -88,19 +76,7 @@ class AuditFixTests(unittest.TestCase):
             site = ApiStore.get_api_sites()[0]
             self.assertEqual(client.patch(f"/api-sites/{site['id']}", json={"weight": None, "column_name": None}).status_code, 200)
             self.assertEqual(ApiStore.get_api_sites()[0], site)
-            self.assertEqual(ApiStore.get_singbox_template(template["id"]), template)
             self.assertEqual(client.get("/settings").json(), original_settings)
-
-    def test_singbox_export_reports_unsupported_transport_as_validation_error(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory), TestClient(app) as client:
-            sub = ApiStore.create_subscription("https://subscription.test")
-            ApiStore.create_singbox_template("template", '{"outbounds":[]}')
-            job = ApiStore.create_refresh_job(sub["id"], 0)
-            ApiStore.update_job(job["id"], status="running")
-            self.assertTrue(ApiStore.save_results_if_current(sub["id"], job["id"], sub["url"], [tested_node(type="xhttp")]))
-            response = client.get("/subscriptions/singbox", params={"subscription_id": sub["id"]})
-            self.assertEqual(response.status_code, 422)
-            self.assertIn("xhttp", response.json()["detail"])
 
     def test_core_downloads_use_timeouts_and_the_configured_destination(self):
         for name, setting, asset_name in [

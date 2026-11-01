@@ -1,8 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SourceData } from "./components/SourceData";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
+  ArrowUp,
+  ArrowDown,
   BarChart3,
   ChevronDown,
   Clipboard,
@@ -21,7 +23,6 @@ import {
   Trash2,
   XCircle,
   AlertTriangle,
-  FileCode,
 } from "lucide-react";
 import {
   Bar,
@@ -35,14 +36,12 @@ import {
   YAxis,
 } from "recharts";
 import { ApiError, createApiClient, enhancedUrl } from "./api";
-import type { ApiClient } from "./api";
 import { useAppData } from "./appData";
-import { duration, formatTime, groupCount, riskBuckets, statusTone, stripComments } from "./appUtils";
+import { duration, formatTime, groupCount, riskBuckets, statusTone } from "./appUtils";
 import { filterNodes, groupNodesByExitIp, sortNodes, type NodeFilters, type NodeSort, type NodeSortKey } from "./nodeFilters";
-import { defaultPreferences, isExportFormat, isExportMode, loadPreferences, savePreferences } from "./preferences";
+import { defaultPreferences, isExportMode, loadPreferences, savePreferences } from "./preferences";
 import type {
   ApiVerdict,
-  ExportFormat,
   ExportMode,
   JobStatus,
   LocalPreferences,
@@ -51,13 +50,12 @@ import type {
   RuntimeSettingsMetadata,
   SubscriptionResults,
   SubscriptionSummary,
-  SingboxTemplate,
   ApiSite,
   ApiSiteInput,
 } from "./types";
 import { Badge, Button, EmptyState, Input, Label, Panel, Select } from "./components/ui";
 
-type View = "dashboard" | "subscriptions" | "nodes" | "jobs" | "export" | "settings" | "singbox" | "api-sites";
+type View = "dashboard" | "subscriptions" | "nodes" | "jobs" | "export" | "settings" | "api-sites";
 
 const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
   { id: "dashboard", label: "总览", icon: LayoutDashboard },
@@ -65,7 +63,6 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
   { id: "nodes", label: "节点详情", icon: Network },
   { id: "jobs", label: "任务监控", icon: Activity },
   { id: "export", label: "增强订阅", icon: FileDown },
-  { id: "singbox", label: "Sing-box 配置", icon: FileCode },
   { id: "settings", label: "设置", icon: Settings },
   { id: "api-sites", label: "API 站点", icon: SlidersHorizontal },
 ];
@@ -125,7 +122,6 @@ export default function App() {
   const [nodeSort, setNodeSort] = useState<NodeSort | null>(null);
   const [detailsNode, setDetailsNode] = useState<NodeResult | null>(null);
   const [exportMode, setExportMode] = useState<ExportMode>(preferences.defaultExportMode);
-  const [exportFormat, setExportFormat] = useState<ExportFormat>(preferences.defaultExportFormat);
   const [exportValidOnly, setExportValidOnly] = useState(true);
   const [subscriptionForm, setSubscriptionForm] = useState({ name: "", url: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -146,8 +142,8 @@ export default function App() {
   });
   const selectedResult = effectiveSubscriptionId ? resultById.get(effectiveSubscriptionId) || null : null;
   const exportPreview = useQuery({
-    queryKey: ["export-preview", preferences.apiBaseUrl, effectiveSubscriptionId, selectedSubscription?.url, selectedResult?.updated_at, exportMode, exportFormat, exportValidOnly],
-    queryFn: () => api.getEnhanced(effectiveSubscriptionId, { mode: exportMode, format: exportFormat, valid_only: exportValidOnly }),
+    queryKey: ["export-preview", preferences.apiBaseUrl, effectiveSubscriptionId, selectedSubscription?.url, selectedResult?.updated_at, exportMode, exportValidOnly],
+    queryFn: () => api.getEnhanced(effectiveSubscriptionId, { mode: exportMode, valid_only: exportValidOnly }),
     enabled: false,
     retry: false,
   });
@@ -165,6 +161,8 @@ export default function App() {
     () => sortNodes(filterNodes(selectedResult?.nodes || [], nodeFilters), nodeSort),
     [selectedResult, nodeFilters, nodeSort],
   );
+  const detailNodes = useMemo(() => groupNodesByExitIp(filteredNodes).flatMap((group) => group.nodes), [filteredNodes]);
+  const detailIndex = detailsNode ? detailNodes.findIndex((node) => node.fingerprint === detailsNode.fingerprint) : -1;
 
 
   const createSubscription = useMutation({
@@ -240,40 +238,6 @@ export default function App() {
     onSuccess: () => {
       setOperationError("");
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
-    },
-    onError: (error) => setOperationError(errorMessage(error)),
-  });
-
-  const singboxTemplatesQuery = useQuery({
-    queryKey: ["singbox-templates", preferences.apiBaseUrl],
-    queryFn: api.listSingboxTemplates,
-  });
-  const templates = singboxTemplatesQuery.data || [];
-
-  const createTemplate = useMutation({
-    mutationFn: api.createSingboxTemplate,
-    onSuccess: () => {
-      setOperationError("");
-      void queryClient.invalidateQueries({ queryKey: ["singbox-templates"] });
-    },
-    onError: (error) => setOperationError(errorMessage(error)),
-  });
-
-  const updateTemplate = useMutation({
-    mutationFn: ({ id, name, content }: { id: string; name?: string; content?: string }) =>
-      api.updateSingboxTemplate(id, { name, content }),
-    onSuccess: () => {
-      setOperationError("");
-      void queryClient.invalidateQueries({ queryKey: ["singbox-templates"] });
-    },
-    onError: (error) => setOperationError(errorMessage(error)),
-  });
-
-  const deleteTemplate = useMutation({
-    mutationFn: api.deleteSingboxTemplate,
-    onSuccess: () => {
-      setOperationError("");
-      void queryClient.invalidateQueries({ queryKey: ["singbox-templates"] });
     },
     onError: (error) => setOperationError(errorMessage(error)),
   });
@@ -410,27 +374,14 @@ export default function App() {
               subscriptions={subscriptionList}
               selectedId={effectiveSubscriptionId}
               mode={exportMode}
-              format={exportFormat}
               validOnly={exportValidOnly}
               preview={exportPreview.isError ? "" : exportPreview.data || ""}
               error={exportPreview.error ? errorMessage(exportPreview.error) : ""}
               apiBaseUrl={preferences.apiBaseUrl}
               onSelect={setSelectedSubscriptionId}
               onMode={setExportMode}
-              onFormat={setExportFormat}
               onValidOnly={setExportValidOnly}
               onPreview={() => void exportPreview.refetch()}
-            />
-          )}
-
-          {view === "singbox" && (
-            <SingboxView
-              subscriptions={subscriptionList}
-              templates={templates}
-              onCreateTemplate={(name, content) => createTemplate.mutate({ name, content })}
-              onUpdateTemplate={(id, name, content) => updateTemplate.mutate({ id, name, content })}
-              onDeleteTemplate={(id) => deleteTemplate.mutate(id)}
-              api={api}
             />
           )}
 
@@ -447,7 +398,10 @@ export default function App() {
         </div>
       </main>
 
-      {detailsNode && <NodeDrawer node={detailsNode} sites={apiSites.data?.sites ?? selectedResult?.api_sites_snapshot} onClose={() => setDetailsNode(null)} />}
+      {detailsNode && <NodeDrawer node={detailsNode} sites={apiSites.data?.sites ?? selectedResult?.api_sites_snapshot}
+        onPrevious={detailIndex > 0 ? () => setDetailsNode(detailNodes[detailIndex - 1]) : undefined}
+        onNext={detailIndex >= 0 && detailIndex < detailNodes.length - 1 ? () => setDetailsNode(detailNodes[detailIndex + 1]) : undefined}
+        onClose={() => setDetailsNode(null)} />}
     </div>
   );
 }
@@ -895,31 +849,28 @@ function ExportView(props: {
   subscriptions: SubscriptionSummary[];
   selectedId: string;
   mode: ExportMode;
-  format: ExportFormat;
   validOnly: boolean;
   preview: string;
   error: string;
   apiBaseUrl: string;
   onSelect: (id: string) => void;
   onMode: (mode: ExportMode) => void;
-  onFormat: (format: ExportFormat) => void;
   onValidOnly: (value: boolean) => void;
   onPreview: () => void;
 }) {
-  const url = props.selectedId ? enhancedUrl(props.apiBaseUrl, props.selectedId, { mode: props.mode, format: props.format, valid_only: props.validOnly }) : "";
+  const url = props.selectedId ? enhancedUrl(props.apiBaseUrl, props.selectedId, { mode: props.mode, valid_only: props.validOnly }) : "";
   return (
     <div className="space-y-4">
       <Panel>
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-4 gap-3">
           <FilterSelect label="订阅" value={props.selectedId} onChange={props.onSelect} options={props.subscriptions.map((item) => [item.id, item.name])} />
           <FilterSelect label="命名模式" value={props.mode} onChange={(value) => isExportMode(value) && props.onMode(value)} options={[["compact", "compact"], ["detailed", "detailed"]]} />
-          <FilterSelect label="格式" value={props.format} onChange={(value) => isExportFormat(value) && props.onFormat(value)} options={[["base64", "base64"], ["plain", "plain"]]} />
           <div><Label>有效节点</Label><Select className="mt-1 w-full" value={String(props.validOnly)} onChange={(event) => props.onValidOnly(event.target.value === "true")}><option value="true">只导出有效</option><option value="false">包含失败</option></Select></div>
           <div className="flex items-end gap-2"><Button disabled={!props.selectedId} onClick={props.onPreview}><Search className="h-4 w-4" />预览</Button><Button variant="secondary" onClick={() => copyText(url)}><ExternalLink className="h-4 w-4" />复制 URL</Button></div>
         </div>
       </Panel>
       <Panel>
-        <div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">订阅内容</div><div className="flex gap-2"><Button variant="secondary" disabled={!props.preview} onClick={() => copyText(props.preview)}><Clipboard className="h-4 w-4" />复制内容</Button><Button variant="secondary" disabled={!props.preview} onClick={() => downloadText(`enhanced_${props.mode}_${props.format}.txt`, props.preview)}><Download className="h-4 w-4" />下载</Button></div></div>
+        <div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">订阅内容（单行 Base64）</div><div className="flex gap-2"><Button variant="secondary" disabled={!props.preview} onClick={() => copyText(props.preview)}><Clipboard className="h-4 w-4" />复制内容</Button><Button variant="secondary" disabled={!props.preview} onClick={() => downloadText(`enhanced_${props.mode}_base64.txt`, props.preview)}><Download className="h-4 w-4" />下载</Button></div></div>
         {props.error && <div role="alert" className="mb-2 text-sm text-red-600">{props.error}</div>}
         <textarea className="h-96 w-full rounded-md border border-border bg-slate-950 p-3 font-mono text-xs text-slate-50" value={props.preview} readOnly placeholder="点击预览后显示增强订阅内容" />
       </Panel>
@@ -971,7 +922,6 @@ function SettingsView({ settings, metadata, preferences, onSaveSettings, onPrefe
           <div><Label>API Base URL</Label><Input className="mt-1" value={preferences.apiBaseUrl} onChange={(event) => onPreferences({ ...preferences, apiBaseUrl: event.target.value })} placeholder="留空表示同源或 Vite 代理" /></div>
           <div><Label>自动刷新</Label><Select className="mt-1 w-full" value={String(preferences.autoRefresh)} onChange={(event) => onPreferences({ ...preferences, autoRefresh: event.target.value === "true" })}><option value="true">开启</option><option value="false">关闭</option></Select></div>
           <div><Label>默认导出模式</Label><Select className="mt-1 w-full" value={preferences.defaultExportMode} onChange={(event) => isExportMode(event.target.value) && onPreferences({ ...preferences, defaultExportMode: event.target.value })}><option value="compact">compact</option><option value="detailed">detailed</option></Select></div>
-          <div><Label>默认导出格式</Label><Select className="mt-1 w-full" value={preferences.defaultExportFormat} onChange={(event) => isExportFormat(event.target.value) && onPreferences({ ...preferences, defaultExportFormat: event.target.value })}><option value="base64">base64</option><option value="plain">plain</option></Select></div>
           <div><Label>表格每页数量</Label><Input className="mt-1" type="number" value={preferences.pageSize} onChange={(event) => onPreferences({ ...preferences, pageSize: Number(event.target.value) || defaultPreferences.pageSize })} /></div>
         </div>
       </Panel>
@@ -1044,16 +994,52 @@ function detectConflicts(evidence: ApiVerdict[]): string[] {
   return conflicts;
 }
 
-export function NodeDrawer({ node, sites, onClose }: { node: NodeResult; sites?: ApiSite[]; onClose: () => void }) {
+export function NodeDrawer({ node, sites, onClose, onPrevious, onNext }: { node: NodeResult; sites?: ApiSite[]; onClose: () => void; onPrevious?: () => void; onNext?: () => void }) {
+  const drawer = useRef<HTMLElement>(null);
+  const scrollTop = useRef(0);
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    drawer.current?.focus({ preventScroll: true });
+    return () => { if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus({ preventScroll: true }); };
+  }, []);
+  useLayoutEffect(() => {
+    if (drawer.current) drawer.current.scrollTop = scrollTop.current;
+  }, [node]);
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key === "Tab") {
+        const buttons = drawer.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+        const first = buttons?.[0], last = buttons?.[buttons.length - 1];
+        if (first && last && (event.shiftKey ? document.activeElement === first || document.activeElement === drawer.current : document.activeElement === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus({ preventScroll: true });
+        }
+        return;
+      }
+      if (event.target instanceof HTMLElement && (event.target.isContentEditable || event.target.closest("input, textarea, select"))) return;
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        if (event.key === "ArrowUp") onPrevious?.();
+        else onNext?.();
+      } else if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onPrevious, onNext, onClose]);
   const evidence = node.probe.evidence.filter((verdict) => !sites || sites.some((site) => site.enabled && site.id === verdict.site_id));
   const conflicts = detectConflicts(evidence);
 
   return (
-    <div className="fixed inset-0 z-30 bg-slate-950/20">
-      <aside className="absolute inset-y-0 right-0 w-[580px] overflow-y-auto border-l border-border bg-white p-5 shadow-2xl">
-        <div className="flex items-center justify-between">
+    <div className="fixed inset-0 z-30 bg-slate-950/20" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <aside ref={drawer} role="dialog" aria-modal="true" aria-label="节点详情" tabIndex={-1} onScroll={(event) => { scrollTop.current = event.currentTarget.scrollTop; }} className="absolute inset-y-0 right-0 w-[580px] max-w-full overflow-y-auto [overflow-anchor:none] border-l border-border bg-white p-5 shadow-2xl">
+        <div className="sticky -top-5 z-10 -mx-5 -mt-5 flex items-center justify-between border-b border-border bg-white p-5">
           <div className="text-lg font-semibold">节点详情</div>
-          <Button variant="secondary" onClick={onClose}>关闭</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" aria-label="上一条" title="上一条（↑）" disabled={!onPrevious} onClick={onPrevious}><ArrowUp className="h-4 w-4" /></Button>
+            <Button variant="secondary" aria-label="下一条" title="下一条（↓）" disabled={!onNext} onClick={onNext}><ArrowDown className="h-4 w-4" /></Button>
+            <Button variant="secondary" onClick={onClose}>关闭</Button>
+          </div>
         </div>
         <div className="mt-4 space-y-4 text-sm">
           <Panel>
@@ -1120,7 +1106,7 @@ export function NodeDrawer({ node, sites, onClose }: { node: NodeResult; sites?:
                   <div key={verdict.site_id || verdict.source} className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
                     <div className="mb-3 flex items-center justify-between gap-3 border-b border-slate-100 pb-2">
                       <span className="font-semibold text-slate-800">{verdict.source}</span>
-                      {verdict.status !== "success" && (
+                      {verdict.raw_data == null && verdict.status !== "success" && (
                         <span className="shrink-0 rounded bg-slate-100 px-2 py-1 text-slate-500">
                           {{ timeout: "请求超时", rate_limited: "请求受限", error: "请求或解析失败", no_data: verdict.raw_data ? "无可用风险判定" : "无数据" }[verdict.status]}
                         </span>
@@ -1129,7 +1115,7 @@ export function NodeDrawer({ node, sites, onClose }: { node: NodeResult; sites?:
                     {verdict.raw_data != null ? (
                       <SourceData value={verdict.raw_data} />
                     ) : (
-                      <div className="whitespace-pre-wrap break-words text-slate-600">{verdict.raw_summary || "暂无原始结果，重新探测后可查看"}</div>
+                      <div className="text-slate-500">未保存原始响应，重新探测后可查看</div>
                     )}
                   </div>
                 ))
@@ -1146,361 +1132,4 @@ export function NodeDrawer({ node, sites, onClose }: { node: NodeResult; sites?:
 
 function Detail({ label, value }: { label: string; value: string }) {
   return <div><div className="text-xs text-slate-500">{label}</div><div className="mt-1 break-all font-medium">{value}</div></div>;
-}
-
-function SingboxView(props: {
-  subscriptions: SubscriptionSummary[];
-  templates: SingboxTemplate[];
-  onCreateTemplate: (name: string, content: string) => void;
-  onUpdateTemplate: (id: string, name: string, content: string) => void;
-  onDeleteTemplate: (id: string) => void;
-  api: ApiClient;
-}) {
-  const { subscriptions, templates, onCreateTemplate, onUpdateTemplate, onDeleteTemplate, api } = props;
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
-  const [activeSubTab, setActiveSubTab] = useState<"edit" | "preview">("edit");
-
-  // Selection defaults
-  useEffect(() => {
-    if (templates.length > 0 && !selectedTemplateId) {
-      setSelectedTemplateId(templates[0].id);
-    }
-  }, [templates, selectedTemplateId]);
-
-  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) || templates[0];
-
-  // Editor Draft State
-  const [draftName, setDraftName] = useState("");
-  const [draftContent, setDraftContent] = useState("");
-
-  useEffect(() => {
-    setDraftName(selectedTemplate?.name || "");
-    setDraftContent(selectedTemplate?.content || "");
-  }, [selectedTemplate]);
-
-  // JSON Validation
-  let jsonError = "";
-  if (draftContent) {
-    try {
-      const clean = stripComments(draftContent);
-      JSON.parse(clean);
-    } catch (e: any) {
-      jsonError = e.message;
-    }
-  }
-
-  // Preview State
-  const [selectedSubIds, setSelectedSubIds] = useState<string[]>([]);
-  useEffect(() => {
-    if (subscriptions.length > 0 && selectedSubIds.length === 0) {
-      setSelectedSubIds([subscriptions[0].id]);
-    }
-  }, [subscriptions, selectedSubIds]);
-
-  const [previewMode, setPreviewMode] = useState<"compact" | "detailed">("compact");
-  const [previewValidOnly, setPreviewValidOnly] = useState(true);
-  const [previewLimit, setPreviewLimit] = useState("");
-  const [previewMaxRisk, setPreviewMaxRisk] = useState("");
-
-  const exportParams = {
-    mode: previewMode,
-    valid_only: previewValidOnly,
-    limit: previewLimit ? parseInt(previewLimit) : undefined,
-    max_risk: previewMaxRisk ? parseFloat(previewMaxRisk) : undefined,
-  };
-  const exportUrl = selectedTemplate && selectedSubIds.length > 0
-    ? api.getSingboxExportUrl(selectedSubIds, selectedTemplate.id, exportParams)
-    : "";
-
-  const preview = useQuery({
-    queryKey: ["singbox-preview", exportUrl, selectedTemplate?.content, subscriptions.filter((sub) => selectedSubIds.includes(sub.id)).map((sub) => [sub.id, sub.url, sub.updated_at])],
-    queryFn: () => api.getSingboxExport(selectedSubIds, selectedTemplate?.id, exportParams),
-    enabled: false,
-    retry: false,
-  });
-  const generatedConfig = preview.isError || !preview.data ? "" : JSON.stringify(preview.data, null, 2);
-
-  return (
-    <div className="grid grid-cols-4 gap-4">
-      {/* Templates List Column */}
-      <Panel className="col-span-1 flex flex-col h-[750px]">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-semibold text-slate-800">配置模板</div>
-          <Button
-            className="h-8 px-2 py-0"
-            onClick={() => {
-              const defaultTpl = `{
-  "experimental": {
-    "cache_file": {
-      "enabled": true,
-      "path": "/etc/sing-box/cache.db",
-      "store_fakeip": true
-    }
-  },
-  "outbounds": [
-    { "tag": "🚀 节点选择", "type": "selector", "outbounds": [ "♻️ 自动选择", "👉 手动选择" ] },
-    { "tag": "♻️ 自动选择", "type": "urltest", "use_all_nodes": true },
-    { "tag": "👉 手动选择", "type": "selector", "use_all_nodes": true }
-  ],
-  "route": {
-    "rules": [
-      { "action": "sniff" }
-    ],
-    "final": "👉 手动选择"
-  }
-}`;
-              onCreateTemplate("新模板", defaultTpl);
-            }}
-          >
-            <Plus className="h-3.5 w-3.5 mr-1" />添加
-          </Button>
-        </div>
-        
-        {templates.length === 0 ? (
-          <EmptyState title="无模板" detail="点击上方添加模板" />
-        ) : (
-          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
-            {templates.map((tpl) => (
-              <div
-                key={tpl.id}
-                onClick={() => setSelectedTemplateId(tpl.id)}
-                className={`group flex items-center justify-between rounded-md px-3 py-2 text-sm cursor-pointer transition ${
-                  selectedTemplateId === tpl.id
-                    ? "bg-blue-50 text-blue-700 font-medium"
-                    : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                <span className="truncate flex-1 pr-2">{tpl.name}</span>
-                {templates.length > 1 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (confirm(`确定要删除模板 "${tpl.name}" 吗？`)) {
-                        onDeleteTemplate(tpl.id);
-                        if (selectedTemplateId === tpl.id) {
-                          setSelectedTemplateId("");
-                        }
-                      }
-                    }}
-                    className="hidden group-hover:block p-1 text-slate-400 hover:text-red-600 transition"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
-
-      {/* Editor & Preview Column */}
-      <div className="col-span-3 space-y-4">
-        {selectedTemplate ? (
-          <Panel className="min-h-[750px] flex flex-col">
-            <div className="mb-4 border-b border-border flex items-center justify-between">
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setActiveSubTab("edit")}
-                  className={`pb-2 text-sm font-semibold border-b-2 transition ${
-                    activeSubTab === "edit"
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  模板编辑
-                </button>
-                <button
-                  onClick={() => setActiveSubTab("preview")}
-                  className={`pb-2 text-sm font-semibold border-b-2 transition ${
-                    activeSubTab === "preview"
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  配置预览与导出
-                </button>
-              </div>
-
-              {activeSubTab === "edit" && (
-                <div className="flex items-center gap-2 pb-1">
-                  {jsonError ? (
-                    <span className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded border border-red-200">
-                      JSON 格式错误
-                    </span>
-                  ) : (
-                    <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
-                      JSON 语法正确
-                    </span>
-                  )}
-                  <Button
-                    className="h-8 px-3 py-0"
-                    disabled={draftName === selectedTemplate.name && draftContent === selectedTemplate.content}
-                    onClick={() => onUpdateTemplate(selectedTemplate.id, draftName, draftContent)}
-                  >
-                    <Save className="h-3.5 w-3.5 mr-1" />保存
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {/* TAB 1: EDIT */}
-            {activeSubTab === "edit" && (
-              <div className="flex-1 flex flex-col space-y-3">
-                <div>
-                  <Label>模板名称</Label>
-                  <Input
-                    className="mt-1"
-                    value={draftName}
-                    onChange={(e) => setDraftName(e.target.value)}
-                    placeholder="请输入模板名称"
-                  />
-                </div>
-                <div className="flex-1 flex flex-col min-h-[480px]">
-                  <Label className="mb-1">JSON5 模板内容 (支持 // 与 /* 注释)</Label>
-                  <textarea
-                    className="flex-1 w-full rounded-md border border-border bg-slate-950 p-3 font-mono text-xs text-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                    value={draftContent}
-                    onChange={(e) => setDraftContent(e.target.value)}
-                    placeholder="请输入 sing-box 模板 JSON5 配置"
-                  />
-                  {jsonError && (
-                    <div className="mt-2 text-xs text-red-500 font-mono bg-red-50 p-2 rounded border border-red-200 whitespace-pre-wrap">
-                      语法错误: {jsonError}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: PREVIEW / EXPORT */}
-            {activeSubTab === "preview" && (
-              <div className="flex-1 flex flex-col space-y-4">
-                {/* Export Options Panel */}
-                <div className="bg-slate-50 p-3 rounded-lg border border-border grid grid-cols-6 gap-3">
-                  <div className="col-span-2">
-                    <Label>选择订阅数据源 (可多选)</Label>
-                    <div className="mt-1 border border-border rounded bg-white max-h-[80px] overflow-y-auto p-1.5 space-y-1">
-                      {subscriptions.map((sub) => {
-                        const isChecked = selectedSubIds.includes(sub.id);
-                        return (
-                          <label key={sub.id} className="flex items-center gap-2 text-xs cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setSelectedSubIds(selectedSubIds.filter((id) => id !== sub.id));
-                                } else {
-                                  setSelectedSubIds([...selectedSubIds, sub.id]);
-                                }
-                              }}
-                              className="rounded text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="truncate">{sub.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div>
-                    <Label>命名模式</Label>
-                    <Select
-                      className="mt-1 w-full text-xs"
-                      value={previewMode}
-                      onChange={(e) => setPreviewMode(e.target.value as any)}
-                    >
-                      <option value="compact">compact (极简)</option>
-                      <option value="detailed">detailed (详细)</option>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>过滤无效节点</Label>
-                    <Select
-                      className="mt-1 w-full text-xs"
-                      value={String(previewValidOnly)}
-                      onChange={(e) => setPreviewValidOnly(e.target.value === "true")}
-                    >
-                      <option value="true">仅有效节点</option>
-                      <option value="false">包含所有节点</option>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>最高风险</Label>
-                    <Input
-                      type="number"
-                      className="mt-1 w-full text-xs"
-                      value={previewMaxRisk}
-                      onChange={(e) => setPreviewMaxRisk(e.target.value)}
-                      placeholder="0-100"
-                    />
-                  </div>
-                  <div>
-                    <Label>出站限制数量</Label>
-                    <Input
-                      type="number"
-                      className="mt-1 w-full text-xs"
-                      value={previewLimit}
-                      onChange={(e) => setPreviewLimit(e.target.value)}
-                      placeholder="不限"
-                    />
-                  </div>
-                </div>
-
-                {/* Operations & Direct Link */}
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex gap-2">
-                      <Button onClick={() => void preview.refetch()} disabled={!exportUrl || preview.isFetching}>
-                        <Search className="h-4 w-4 mr-1" />
-                        {preview.isFetching ? "正在生成..." : "预览生成配置"}
-                      </Button>
-                      {generatedConfig && (
-                        <>
-                          <Button variant="secondary" onClick={() => copyText(generatedConfig)}>
-                            <Clipboard className="h-4 w-4 mr-1" />复制内容
-                          </Button>
-                          <Button variant="secondary" onClick={() => downloadText(`${selectedTemplate.name}_export.json`, generatedConfig)}>
-                            <Download className="h-4 w-4 mr-1" />下载 JSON
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                    {exportUrl && (
-                      <Button variant="secondary" onClick={() => copyText(exportUrl)}>
-                        <ExternalLink className="h-4 w-4 mr-1" />复制订阅链接
-                      </Button>
-                    )}
-                  </div>
-                  {exportUrl && (
-                    <div className="text-xs text-slate-500 bg-slate-50 p-2 rounded border border-border truncate select-all">
-                      订阅 URL: <span className="font-mono text-slate-700">{exportUrl}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Preview Textbox */}
-                <div className="flex-1 flex flex-col min-h-[350px]">
-                  {preview.error && (
-                    <div className="mb-2 text-xs text-red-500 bg-red-50 p-2 rounded border border-red-200">
-                      {errorMessage(preview.error)}
-                    </div>
-                  )}
-                  <textarea
-                    className="flex-1 w-full rounded-md border border-border bg-slate-950 p-3 font-mono text-xs text-slate-50 focus:outline-none resize-none"
-                    value={generatedConfig}
-                    readOnly
-                    placeholder="点击 '预览生成配置' 按钮查看生成结果"
-                  />
-                </div>
-              </div>
-            )}
-          </Panel>
-        ) : (
-          <Panel className="h-[750px] flex items-center justify-center">
-            <EmptyState title="请选择或创建一个配置模板" />
-          </Panel>
-        )}
-      </div>
-    </div>
-  );
 }

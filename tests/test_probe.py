@@ -11,7 +11,7 @@ class LightweightProbeTests(unittest.TestCase):
     def test_source_responses_survive_normalization_and_adapter_errors(self):
         site = {"id": "coffee", "provider": "netcoffee"}
         for data in ({"trust_score": 72, "ai_verdict": {"reasoning": "original"}},
-                     {"custom_field": [False, 0, None]}, {}, None):
+                     {"custom_field": [False, 0, None]}, {}, None, [1, False], "original text", False, 0):
             with self.subTest(data=data):
                 verdict = LightweightProbe._verdict_for_site(site, data, "success", "1.1.1.1")
                 self.assertEqual(verdict.raw_data, data)
@@ -126,7 +126,8 @@ class LightweightProbeTests(unittest.TestCase):
                                 if method == "site" else
                                 await LightweightProbe._fetch_exit_ip("socks5://127.0.0.1:1080", "https://exit.test")
                             )
-                        expected = ({"ip": "1.1.1.1"}, "success") if status == "success" else (None, status)
+                        last_outcome = outcomes[calls - 1]
+                        expected = ({"ip": "1.1.1.1"}, status) if isinstance(last_outcome, int) else (None, status)
                         if method == "exit":
                             expected = ("1.1.1.1", {"ip": "1.1.1.1"}) if status == "success" else ("", None)
                         self.assertEqual(result, expected)
@@ -135,6 +136,25 @@ class LightweightProbeTests(unittest.TestCase):
                         for request in session.get.call_args_list:
                             self.assertEqual(request.kwargs["timeout"], 3.0)
                         self.assertEqual(settings.API_TIMEOUT, 3.0)
+        asyncio.run(run_case())
+
+    def test_raw_error_and_non_object_responses_are_preserved(self):
+        async def run_case():
+            for http, data, expected_status in ((400, {"error": {"api_key": ["required"]}}, "error"),
+                                                (429, {"error": "quota"}, "rate_limited"),
+                                                (404, "<h1>Not Found</h1>", "error"),
+                                                (200, [False, 0, None], "success"),
+                                                (200, False, "success")):
+                with self.subTest(http=http, data=data):
+                    response = MagicMock(status=http)
+                    response.json = AsyncMock(side_effect=ValueError()) if isinstance(data, str) else AsyncMock(return_value=data)
+                    response.text = AsyncMock(return_value=data)
+                    session = MagicMock()
+                    session.get.return_value.__aenter__.return_value = response
+                    with patch("module_probe.ProxyConnector.from_url"), patch("module_probe.aiohttp.ClientSession") as client:
+                        client.return_value.__aenter__.return_value = session
+                        result = await LightweightProbe._fetch_site({"url_template": "https://example.test/{ip}"}, "1.1.1.1", "socks5://unused")
+                    self.assertEqual(result, (data, expected_status))
         asyncio.run(run_case())
 
     def test_cancelled_site_request_is_not_retried(self):

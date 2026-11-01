@@ -1,12 +1,10 @@
 import type {
-  ExportFormat,
   ExportMode,
   JobStatus,
   RuntimeSettings,
   RuntimeSettingsMetadata,
   SubscriptionResults,
   SubscriptionSummary,
-  SingboxTemplate,
   ApiSite,
   ApiSiteInput,
   ApiSitesConfig,
@@ -52,7 +50,7 @@ export interface ApiClient {
   getJob(id: string): Promise<JobStatus>;
   cancelJob(id: string): Promise<JobStatus>;
   getResults(id: string): Promise<SubscriptionResults>;
-  getEnhanced(id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number; max_risk?: number }): Promise<string>;
+  getEnhanced(id: string | string[], params: { mode: ExportMode; valid_only: boolean; limit?: number; max_risk?: number }): Promise<string>;
   getSettings(): Promise<RuntimeSettings>;
   getSettingsMetadata(): Promise<RuntimeSettingsMetadata>;
   updateSettings(input: Partial<RuntimeSettings>): Promise<RuntimeSettings>;
@@ -63,13 +61,6 @@ export interface ApiClient {
   deleteApiSite(id: string): Promise<{ deleted: boolean; id: string }>;
   orderApiSites(ids: string[]): Promise<ApiSite[]>;
   updateExitIpEndpoint(exit_ip_endpoint: string): Promise<{ exit_ip_endpoint: string }>;
-
-  listSingboxTemplates(): Promise<SingboxTemplate[]>;
-  createSingboxTemplate(input: { name: string; content: string }): Promise<SingboxTemplate>;
-  updateSingboxTemplate(id: string, input: { name?: string; content?: string }): Promise<SingboxTemplate>;
-  deleteSingboxTemplate(id: string): Promise<{ deleted: boolean; template_id: string }>;
-  getSingboxExport(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }): Promise<Record<string, unknown>>;
-  getSingboxExportUrl(subscriptionIds: string[], templateId?: string, params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }): string;
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -149,63 +140,20 @@ export function createApiClient(baseUrl: string): ApiClient {
     deleteApiSite: (id) => request(baseUrl, `/api-sites/${encodeURIComponent(id)}`, { method: "DELETE" }),
     orderApiSites: (ids) => request(baseUrl, "/api-sites/order", { method: "PUT", body: JSON.stringify({ ids }) }),
     updateExitIpEndpoint: (exit_ip_endpoint) => request(baseUrl, "/exit-ip-endpoint", { method: "PATCH", body: JSON.stringify({ exit_ip_endpoint }) }),
-
-    listSingboxTemplates: () => request(baseUrl, "/singbox/templates"),
-    createSingboxTemplate: (input) =>
-      request(baseUrl, "/singbox/templates", {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
-    updateSingboxTemplate: (id, input) =>
-      request(baseUrl, `/singbox/templates/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body: JSON.stringify(input),
-      }),
-    deleteSingboxTemplate: (id) =>
-      request(baseUrl, `/singbox/templates/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      }),
-    getSingboxExport: (subscriptionIds, templateId, params) => request(baseUrl, singboxPath(subscriptionIds, templateId, params)),
-    getSingboxExportUrl: (subscriptionIds, templateId, params) => singboxUrl(baseUrl, subscriptionIds, templateId, params),
   };
 }
 
-function enhancedPath(id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number; max_risk?: number }): string {
+function enhancedPath(id: string | string[], params: { mode: ExportMode; valid_only: boolean; limit?: number; max_risk?: number }): string {
   const query = new URLSearchParams();
   const ids = Array.isArray(id) ? id : [id];
   ids.forEach((subscriptionId) => query.append("subscription_id", subscriptionId));
   query.append("mode", params.mode);
-  query.append("format", params.format);
   query.append("valid_only", String(params.valid_only));
   if (params.limit !== undefined) query.append("limit", String(params.limit));
   if (params.max_risk !== undefined) query.append("max_risk", String(params.max_risk));
   return `/subscriptions/enhanced?${query.toString()}`;
 }
 
-export function enhancedUrl(baseUrl: string, id: string | string[], params: { mode: ExportMode; format: ExportFormat; valid_only: boolean; limit?: number; max_risk?: number }): string {
+export function enhancedUrl(baseUrl: string, id: string | string[], params: { mode: ExportMode; valid_only: boolean; limit?: number; max_risk?: number }): string {
   return new URL(joinUrl(baseUrl, enhancedPath(id, params)), window.location.origin).href;
-}
-
-function singboxPath(
-  subscriptionIds: string[],
-  templateId?: string,
-  params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }
-): string {
-  const query = new URLSearchParams();
-  subscriptionIds.forEach((id) => query.append("subscription_id", id));
-  if (templateId) query.append("template_id", templateId);
-  if (params?.mode) query.append("mode", params.mode);
-  if (params?.valid_only !== undefined) query.append("valid_only", String(params.valid_only));
-  if (params?.limit !== undefined) query.append("limit", String(params.limit));
-  if (params?.max_risk !== undefined) query.append("max_risk", String(params.max_risk));
-  return `/subscriptions/singbox?${query.toString()}`;
-}
-
-export function singboxUrl(
-  baseUrl: string,
-  subscriptionIds: string[],
-  templateId?: string,
-  params?: { mode?: string; valid_only?: boolean; limit?: number; max_risk?: number }
-): string {
-  return new URL(joinUrl(baseUrl, singboxPath(subscriptionIds, templateId, params)), window.location.origin).href;
 }

@@ -235,10 +235,10 @@ class SubscriptionExporter:
         os.makedirs(output_dir, exist_ok=True)
 
         outputs = {
-            "enhanced_compact.txt": SubscriptionExporter.build_uris(
+            "enhanced_compact_base64.txt": SubscriptionExporter.build_uris(
                 nodes, "compact", compact_max_length, valid_only=valid_only
             ),
-            "enhanced_detailed.txt": SubscriptionExporter.build_uris(
+            "enhanced_detailed_base64.txt": SubscriptionExporter.build_uris(
                 nodes, "detailed", detailed_max_length, valid_only=valid_only
             ),
         }
@@ -246,13 +246,6 @@ class SubscriptionExporter:
         for filename, uris in outputs.items():
             path = os.path.join(output_dir, filename)
             with open(path, "w", encoding="utf-8") as f:
-                content = "\n".join(uris)
-                if content:
-                    content += "\n"
-                f.write(content)
-
-            base64_path = path.replace(".txt", "_base64.txt")
-            with open(base64_path, "w", encoding="utf-8") as f:
                 f.write(SubscriptionExporter.encode_subscription(uris))
 
         print(f"[SubscriptionExporter] Enhanced subscriptions saved to {output_dir}")

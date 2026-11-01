@@ -4,6 +4,7 @@ import json
 import time
 import urllib.parse
 from dataclasses import replace
+from typing import Any
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
@@ -83,19 +84,22 @@ class LightweightProbe:
                     return "", None
 
     @staticmethod
-    async def _fetch_site(site: dict, ip: str, socks5_url: str) -> tuple[dict | None, str]:
+    async def _fetch_site(site: dict, ip: str, socks5_url: str) -> tuple[Any, str]:
         for attempt in range(2):
             try:
                 url = str(site["url_template"]).format(ip=urllib.parse.quote(ip, safe=""), key=urllib.parse.quote(str(site.get("api_key", "")), safe=""))
                 connector = ProxyConnector.from_url(socks5_url, rdns=True)
                 async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.get(url, timeout=settings.API_TIMEOUT) as response:
-                        if response.status == 429: return None, "rate_limited"
                         if response.status >= 500 and attempt == 0:
                             continue
-                        if response.status != 200: return None, "error"
-                        data = await response.json(content_type=None)
-                        return (data, "success") if isinstance(data, dict) else (None, "no_data")
+                        try:
+                            data = await response.json(content_type=None)
+                        except (ValueError, UnicodeDecodeError):
+                            data = await response.text()
+                        if response.status == 429: return data, "rate_limited"
+                        if response.status != 200: return data, "error"
+                        return data, "success"
             except asyncio.TimeoutError:
                 if attempt == 1:
                     return None, "timeout"
@@ -104,9 +108,9 @@ class LightweightProbe:
                     return None, "error"
 
     @staticmethod
-    def _verdict_for_site(site: dict, data: dict | None, status: str, ip: str) -> ApiVerdict:
+    def _verdict_for_site(site: dict, data: Any, status: str, ip: str) -> ApiVerdict:
         adapter = getattr(ProfileAdapters, f"from_{site['provider']}", None)
-        if status != "success" or not data or not adapter:
+        if status != "success" or not isinstance(data, dict) or not data or not adapter:
             return ApiVerdict(source=site.get("column_name", site["id"]), site_id=site["id"], status=status if status != "success" else "no_data", raw_data=data)
         try:
             verdict = adapter(data, ip) if site["provider"] == "proxycheck" else adapter(data)

@@ -7,12 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from module_api_presenter import build_detail_nodes, build_plain_subscription, normalize_job, normalize_subscription
+from module_api_presenter import build_detail_nodes, build_subscription, normalize_job, normalize_subscription
 from module_api_store import API_PROVIDERS, ApiStore
 from module_runtime_settings import RuntimeSettings
 from module_subscription_exporter import SubscriptionExporter
 from module_subscription_service import SubscriptionRefreshService
-from module_singbox_exporter import generate_singbox_config, parse_singbox_template
 
 
 @asynccontextmanager
@@ -69,16 +68,6 @@ class RuntimeSettingsRequest(BaseModel):
     TTFB_TARGET_URL: Optional[str] = Field(default=None, min_length=1)
     SPEEDTEST_URL: Optional[str] = Field(default=None, min_length=1)
     PROXY_CORE: Optional[str] = Field(default=None, pattern="^(sing-box|xray)$")
-
-
-class SingboxTemplateCreateRequest(BaseModel):
-    name: str = Field(..., min_length=1)
-    content: str = Field(..., min_length=1)
-
-
-class SingboxTemplateUpdateRequest(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1)
-    content: Optional[str] = Field(default=None, min_length=1)
 
 
 class ApiSiteRequest(BaseModel):
@@ -261,7 +250,6 @@ def build_enhanced_subscription_response(
     limit: Optional[int],
     max_risk: Optional[float],
     mode: Literal["compact", "detailed"],
-    format: Literal["base64", "plain"],
     valid_only: bool,
     geo: Optional[list[str]],
     network: Optional[list[str]],
@@ -273,11 +261,7 @@ def build_enhanced_subscription_response(
         geo=geo, network=network, exclude_type=exclude_type, max_ttfb=max_ttfb,
     )
 
-    plain = build_plain_subscription(sorted_nodes, mode=mode, valid_only=False)
-    if format == "plain":
-        return PlainTextResponse(plain)
-    uris = plain.splitlines()
-    return PlainTextResponse(SubscriptionExporter.encode_subscription(uris))
+    return PlainTextResponse(build_subscription(sorted_nodes, mode=mode, valid_only=False))
 
 
 @app.post("/subscriptions")
@@ -297,7 +281,6 @@ async def get_enhanced_subscription(
     limit: Optional[int] = Query(default=None, ge=1),
     max_risk: Optional[float] = Query(default=None, ge=0.0, le=100.0),
     mode: Literal["compact", "detailed"] = "compact",
-    format: Literal["base64", "plain"] = "base64",
     valid_only: bool = Query(default=True),
     geo: Optional[list[str]] = Query(default=None),
     network: Optional[list[str]] = Query(default=None),
@@ -309,7 +292,6 @@ async def get_enhanced_subscription(
         limit=limit,
         max_risk=max_risk,
         mode=mode,
-        format=format,
         valid_only=valid_only,
         geo=geo,
         network=network,
@@ -324,7 +306,6 @@ async def get_single_enhanced_subscription(
     limit: Optional[int] = Query(default=None, ge=1),
     max_risk: Optional[float] = Query(default=None, ge=0.0, le=100.0),
     mode: Literal["compact", "detailed"] = "compact",
-    format: Literal["base64", "plain"] = "base64",
     valid_only: bool = Query(default=True),
     geo: Optional[list[str]] = Query(default=None),
     network: Optional[list[str]] = Query(default=None),
@@ -336,49 +317,12 @@ async def get_single_enhanced_subscription(
         limit=limit,
         max_risk=max_risk,
         mode=mode,
-        format=format,
         valid_only=valid_only,
         geo=geo,
         network=network,
         exclude_type=exclude_type,
         max_ttfb=max_ttfb,
     )
-
-
-@app.get("/subscriptions/singbox")
-async def get_singbox_subscription(
-    subscription_ids: list[str] = Query(..., alias="subscription_id"),
-    template_id: Optional[str] = Query(default=None),
-    limit: Optional[int] = Query(default=None, ge=1),
-    max_risk: Optional[float] = Query(default=None, ge=0.0, le=100.0),
-    mode: Literal["compact", "detailed"] = "compact",
-    valid_only: bool = Query(default=True),
-):
-    if template_id:
-        template = ApiStore.get_singbox_template(template_id)
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found")
-    else:
-        templates = ApiStore.list_singbox_templates()
-        if not templates:
-            raise HTTPException(status_code=400, detail="No templates available")
-        template = templates[0]
-
-    sorted_nodes = select_subscription_nodes(
-        subscription_ids, limit=limit, max_risk=max_risk, valid_only=valid_only,
-    )
-
-    try:
-        config = generate_singbox_config(
-            template["content"],
-            sorted_nodes,
-            mode=mode,
-            max_name_length=96 if mode == "detailed" else 64
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=f"Configuration generation error: {e}")
-
-    return config
 
 
 @app.get("/subscriptions/{subscription_id}")
@@ -530,54 +474,11 @@ async def update_exit_ip_endpoint(payload: ExitIpEndpointRequest) -> dict:
         raise HTTPException(status_code=422, detail=str(e))
 
 
-@app.get("/singbox/templates")
-async def list_singbox_templates() -> list[dict]:
-    return ApiStore.list_singbox_templates()
-
-
-@app.post("/singbox/templates")
-async def create_singbox_template(payload: SingboxTemplateCreateRequest) -> dict:
-    try:
-        parse_singbox_template(payload.content)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=f"Invalid Sing-box template content: {e}")
-    return ApiStore.create_singbox_template(payload.name, payload.content)
-
-
-@app.get("/singbox/templates/{template_id}")
-async def get_singbox_template(template_id: str) -> dict:
-    template = ApiStore.get_singbox_template(template_id)
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-    return template
-
-
-@app.patch("/singbox/templates/{template_id}")
-async def update_singbox_template(template_id: str, payload: SingboxTemplateUpdateRequest) -> dict:
-    data = payload.model_dump(exclude_unset=True, exclude_none=True)
-    if not data:
-        raise HTTPException(status_code=422, detail="No fields to update")
-    if "content" in data:
-        try:
-            parse_singbox_template(data["content"])
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=f"Invalid Sing-box template content: {e}")
-    updated = ApiStore.update_singbox_template(template_id, **data)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Template not found")
-    return updated
-
-
-@app.delete("/singbox/templates/{template_id}")
-async def delete_singbox_template(template_id: str) -> dict:
-    if not ApiStore.delete_singbox_template(template_id):
-        raise HTTPException(status_code=404, detail="Template not found")
-    return {"deleted": True, "template_id": template_id}
-
-
 @app.get("/")
 @app.get("/{path:path}")
 async def serve_frontend_asset_or_route(path: str = ""):
+    if path.split("/", 1)[0] in {"subscriptions", "singbox", "jobs", "settings", "api-sites"}:
+        raise HTTPException(status_code=404, detail="Not found")
     dist_dir = FRONTEND_DIST_DIR
     index_path = dist_dir / "index.html"
     if not index_path.exists():

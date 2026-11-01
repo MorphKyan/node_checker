@@ -1,3 +1,4 @@
+import base64
 import asyncio
 import tempfile
 import threading
@@ -347,15 +348,14 @@ class JsonRefactorTests(unittest.TestCase):
         sub = ApiStore.create_subscription("https://filters.example.test/sub")
         ApiStore.save_results(sub["id"], [node(10, name="low"), node(90, name="high"), node(15, valid=False, name="invalid")])
         with TestClient(app) as client:
-            only_low = client.get(f"/subscriptions/{sub['id']}/enhanced?format=plain&max_risk=20")
+            only_low = client.get(f"/subscriptions/{sub['id']}/enhanced?max_risk=20")
             self.assertEqual(only_low.status_code, 200)
-            self.assertEqual(len(only_low.text.splitlines()), 1)
-            include_invalid = client.get(f"/subscriptions/{sub['id']}/enhanced?format=plain&max_risk=20&valid_only=false")
-            self.assertEqual(len(include_invalid.text.splitlines()), 2)
+            self.assertEqual(len(base64.b64decode(only_low.text).decode().splitlines()), 1)
+            include_invalid = client.get(f"/subscriptions/{sub['id']}/enhanced?max_risk=20&valid_only=false")
+            self.assertEqual(len(base64.b64decode(include_invalid.text).decode().splitlines()), 2)
 
-    def test_export_formats_share_filtering_sorting_and_limit(self):
+    def test_base64_export_filtering_sorting_and_limit(self):
         sub = ApiStore.create_subscription("https://filters.example.test/sub")
-        ApiStore.create_singbox_template("test", '{"outbounds":[]}')
         ApiStore.save_results(sub["id"], [node(None, name="unknown"), node(90, name="high"),
                                          node(15, valid=False, name="invalid"), node(10, name="low")])
         with TestClient(app) as client:
@@ -365,14 +365,10 @@ class JsonRefactorTests(unittest.TestCase):
                                    ({"limit": 1}, ["low"]), ({"max_risk": 0}, [])]:
                 with self.subTest(filters=filters):
                     params = {"subscription_id": sub["id"], **filters}
-                    plain = client.get("/subscriptions/enhanced", params={**params, "format": "plain"})
-                    config = client.get("/subscriptions/singbox", params=params)
-                    self.assertEqual(plain.status_code, 200)
-                    self.assertEqual(config.status_code, 200)
-                    self.assertEqual([uri.split("@", 1)[0] for uri in plain.text.splitlines()],
+                    response = client.get("/subscriptions/enhanced", params=params)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual([uri.split("@", 1)[0] for uri in base64.b64decode(response.text, validate=True).decode().splitlines()],
                                      [f"vless://uuid-{name}" for name in names])
-                    self.assertEqual([out["uuid"] for out in config.json()["outbounds"]],
-                                     [f"uuid-{name}" for name in names])
 
     def test_enhanced_export_retains_additional_filters(self):
         sub = ApiStore.create_subscription("https://filters.example.test/sub")
@@ -386,9 +382,9 @@ class JsonRefactorTests(unittest.TestCase):
                                    ({"exclude_type": "VPN"}, 0), ({"max_ttfb": 119}, 0)]:
                 with self.subTest(filters=filters):
                     response = client.get(f"/subscriptions/{sub['id']}/enhanced",
-                                          params={"format": "plain", **filters})
+                                          params=filters)
                     self.assertEqual(response.status_code, 200)
-                    self.assertEqual(len(response.text.splitlines()), count)
+                    self.assertEqual(len(base64.b64decode(response.text).decode().splitlines()), count)
 
     def test_frontend_root_and_routes_share_index_fallback(self):
         dist = Path(self.temp.name) / "dist"

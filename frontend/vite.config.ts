@@ -32,7 +32,6 @@ export default defineConfig({
       "/settings": apiTarget,
       "/api-sites": apiTarget,
       "/exit-ip-endpoint": apiTarget,
-      "/singbox/templates": apiTarget,
     },
   },
   test: {

@@ -21,3 +21,11 @@ it("migrates current legacy preferences without resetting user choices", () => {
   savePreferences({ ...defaultPreferences, pageSize: 10 });
   expect(loadPreferences()).toMatchObject({ autoRefresh: true, pageSize: 10 });
 });
+
+it("discards the removed export format preference", () => {
+  localStorage.setItem("node-checker.preferences", JSON.stringify({
+    ...defaultPreferences, defaultExportFormat: "plain", autoRefreshVersion: 1,
+  }));
+  expect(loadPreferences()).not.toHaveProperty("defaultExportFormat");
+  expect(JSON.parse(localStorage.getItem("node-checker.preferences")!)).not.toHaveProperty("defaultExportFormat");
+});

@@ -20,7 +20,7 @@ data/
   probe-cache/{cache_key}.json
 ```
 
-- `config.json` 保存版本号、运行设置、出口 IP 端点、API 站点、订阅定义和 Sing-box 模板。
+- `config.json` 保存版本号、运行设置、出口 IP 端点、API 站点和订阅定义；订阅导出统一使用单行 Base64。
 - API Key 以明文保存在本地 JSON，但所有读取接口只返回 `api_key_configured`；日志、结果和异常不得泄漏 Key 或完整鉴权 URL。
 - 检测结果、任务状态和探测缓存分别使用独立 JSON 文件，避免单个大文件在并发探测时频繁整体重写。
 - 所有写入通过同目录临时文件、刷新落盘和 `os.replace` 原子替换；进程内使用细粒度锁保护配置、任务和单个结果写入。

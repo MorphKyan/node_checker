@@ -38,15 +38,15 @@ SG
 ## 功能概览
 
 - 解析 VLESS、Hysteria2（hy2 / hysteria2）和 Shadowsocks（ss）订阅，支持混合明文 URI 列表和 base64 订阅内容。
-- SS 支持 SIP002（Base64URL 或明文转义凭据）、旧版整段 Base64、IPv6 和 SS2022；可通过 Xray / sing-box 检测，并导出增强 URI、sing-box 配置。SIP003 插件参数保留并传给 sing-box，Xray 遇到插件会明确拒绝。
-- VLESS 的 TCP、WebSocket、gRPC 可用于两种内核；XHTTP 使用 Xray 检测，导出为 sing-box 配置时会返回 422，不会静默转换为 TCP。
+- SS 支持 SIP002（Base64URL 或明文转义凭据）、旧版整段 Base64、IPv6 和 SS2022；可通过 Xray / sing-box 检测，并导出 Base64 增强订阅。SIP003 插件参数保留并传给 sing-box，Xray 遇到插件会明确拒绝。
+- VLESS 的 TCP、WebSocket、gRPC 可用于两种内核；XHTTP 使用 Xray 检测，sing-box 检测不支持 XHTTP，不会静默转换为 TCP；Base64 订阅保留原始连接参数。
 - Hysteria2 的混淆、上下行带宽和 `ports` 端口跳跃参数由 sing-box 保留；Xray 检测遇到这些参数会明确拒绝，请选用 sing-box。
 - 检测 TCP Ping、TTFB、出口 IP、实际地区、ASN，以及到节点入口的路径和骨干网络线索；绕路判断暂未实现。
 - 查询 IP 情报并生成节点画像，包括网络分类、类型分类、风险分和证据。
 - 节点是否有效仅由 TTFB 决定；IP 情报 API 只提供画像与风险证据。
 - 普通刷新重新拉取订阅，默认不测速；测速刷新使用已保存节点检测，不重新拉取订阅。数字框指定每区域精测数量：大于 0 时先粗测所有有效节点，再选每区域 Top-N 精测；0 表示不测速。
 - 导出 Markdown 总览报告和每个节点的详细报告。
-- 导出 compact/detailed 两种增强订阅，并同时提供 plain/base64 文件。
+- 导出 compact/detailed 两种增强订阅，文件统一为单行 Base64。
 - 提供本地 FastAPI 后端，支持添加订阅、刷新检测、返回增强订阅和查询详细结果。
 - 提供 React 控制台，用于订阅管理、任务监控、节点筛选、结果查看和增强订阅预览。
 
@@ -152,9 +152,7 @@ inputs/test.txt
 ```text
 result/report.md
 result/node_details/
-result/subscriptions/enhanced_compact.txt
 result/subscriptions/enhanced_compact_base64.txt
-result/subscriptions/enhanced_detailed.txt
 result/subscriptions/enhanced_detailed_base64.txt
 ```
 
@@ -162,9 +160,7 @@ result/subscriptions/enhanced_detailed_base64.txt
 
 - `report.md` 是节点总览表。
 - `result/node_details/` 包含每个节点的详细检测报告。
-- `enhanced_compact.txt` 是紧凑命名的明文节点 URI 列表。
 - `enhanced_compact_base64.txt` 是紧凑命名的 base64 订阅。
-- `enhanced_detailed.txt` 是详细命名的明文节点 URI 列表。
 - `enhanced_detailed_base64.txt` 是详细命名的 base64 订阅。
 
 ## 增强订阅命名
@@ -291,7 +287,6 @@ Query 参数：
 
 ```text
 mode=compact|detailed
-format=base64|plain
 valid_only=true|false
 ```
 
@@ -299,7 +294,6 @@ valid_only=true|false
 
 ```text
 mode=compact
-format=base64
 valid_only=true
 ```
 
@@ -307,8 +301,10 @@ valid_only=true
 
 ```text
 http://127.0.0.1:8000/subscriptions/sub_xxx/enhanced
-http://127.0.0.1:8000/subscriptions/sub_xxx/enhanced?format=plain&mode=detailed
+http://127.0.0.1:8000/subscriptions/sub_xxx/enhanced?mode=detailed
 ```
+
+导出统一返回单行 Base64 文本（UTF-8 节点 URI 列表整体编码），解码后每行一个节点。`mode` 仅控制节点命名，连接参数保持原样。前端预览、复制、下载和 CLI 文件都使用这一编码。
 
 增强订阅从 JSON 中保存的最新检测结果实时生成，不依赖 `result/subscriptions/*.txt` 文件。若订阅还没有完成的检测结果，会返回 `409 Conflict`。
 

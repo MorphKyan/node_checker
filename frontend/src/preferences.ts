@@ -14,16 +14,17 @@ export function loadPreferences(): LocalPreferences {
     const raw = localStorage.getItem(storageKey);
     // Keep existing browser preferences when upgrading the project name.
     const stored = JSON.parse(raw ?? localStorage.getItem("vless-node-checker.preferences") ?? "null");
-    if (!stored) return defaultPreferences;
-    const { apiBaseUrl, autoRefresh, defaultExportMode, pageSize } = { ...defaultPreferences, ...stored };
-    const preferences: LocalPreferences = { apiBaseUrl, autoRefresh, defaultExportMode, pageSize };
-    if (stored.autoRefreshVersion !== 1) {
-      preferences.autoRefresh = true;
-    }
+    if (!stored || typeof stored !== "object") return { ...defaultPreferences };
+    const preferences: LocalPreferences = {
+      apiBaseUrl: typeof stored.apiBaseUrl === "string" ? stored.apiBaseUrl : defaultPreferences.apiBaseUrl,
+      autoRefresh: stored.autoRefreshVersion === 1 && typeof stored.autoRefresh === "boolean" ? stored.autoRefresh : true,
+      defaultExportMode: isExportMode(stored.defaultExportMode) ? stored.defaultExportMode : defaultPreferences.defaultExportMode,
+      pageSize: Number.isSafeInteger(stored.pageSize) && stored.pageSize > 0 ? stored.pageSize : defaultPreferences.pageSize,
+    };
     savePreferences(preferences);
     return preferences;
   } catch {
-    return defaultPreferences;
+    return { ...defaultPreferences };
   }
 }
 

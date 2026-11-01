@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import asyncio
@@ -143,9 +144,8 @@ class TunnelController:
         else:
             config_path = TunnelController.generate_singbox_config(node, local_port)
             executable, fallback, arguments = settings.SING_BOX_PATH, "sing-box", ["run"]
-        executable = os.path.join(os.getcwd(), executable)
-        if not os.path.exists(executable):
-            executable = fallback
+        executable = (os.path.abspath(executable) if os.path.exists(executable)
+                      else shutil.which(executable) or fallback)
         cmd = [executable, *arguments, "-c", config_path]
 
         process = None
@@ -156,6 +156,8 @@ class TunnelController:
                 stderr=subprocess.DEVNULL
             )
             await asyncio.sleep(settings.TUNNEL_START_DELAY)
+            if process.returncode is not None:
+                raise RuntimeError(f"Proxy core exited during startup (code {process.returncode})")
             return process, config_path
         except (Exception, asyncio.CancelledError):
             await TunnelController.stop_tunnel(process, config_path)

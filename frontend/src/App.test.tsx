@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App, { NodeDrawer, NodesView } from "./App";
@@ -92,6 +92,13 @@ describe("App", () => {
       await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(uri));
       expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
     }
+
+    vi.stubGlobal("navigator", {});
+    vi.stubGlobal("isSecureContext", false);
+    fireEvent.click(screen.getByRole("button", { name: /^(复制|已复制)$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "原始链接" }));
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("button", { name: "已复制" })).not.toBeInTheDocument();
   });
 
   it("renders the console navigation", async () => {
@@ -132,6 +139,52 @@ describe("App", () => {
     expect(await screen.findByText("多协议节点分析控制台")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /订阅管理/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /暂停轮询|开启轮询/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps settings and API-site drafts when saving fails", async () => {
+    let saveResponse: Promise<Response> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "PATCH" || init?.method === "POST") {
+        return saveResponse ?? new Response(JSON.stringify({ detail: "save failed" }), { status: 422, headers: { "content-type": "application/json" } });
+      }
+      const data = url.endsWith("/settings") ? { FILTER_CONCURRENCY: 10 }
+        : url.endsWith("/api-sites/providers") ? ["ipwhois"]
+        : url.endsWith("/api-sites") ? { sites: [], exit_ip_endpoint: "https://exit.test" } : [];
+      return new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const concurrency = await screen.findByLabelText("过滤并发");
+    fireEvent.change(concurrency, { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await screen.findByText("422: save failed");
+    expect(concurrency).toHaveValue(12);
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "API 站点" }));
+    const id = screen.getByPlaceholderText("唯一 ID");
+    fireEvent.change(id, { target: { value: "custom" } });
+    fireEvent.change(screen.getByPlaceholderText("表格列名"), { target: { value: "Custom site" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(id).toHaveValue("custom"));
+    expect(screen.getByPlaceholderText("表格列名")).toHaveValue("Custom site");
+
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    let resolveSave!: (response: Response) => void;
+    saveResponse = new Promise((resolve) => { resolveSave = resolve; });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(client.isMutating()).toBe(1));
+    fireEvent.change(id, { target: { value: "new-draft" } });
+    await act(async () => resolveSave(new Response("{}", { headers: { "content-type": "application/json" } })));
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    expect(id).toHaveValue("new-draft");
+    expect(screen.queryByText("422: save failed")).not.toBeInTheDocument();
+
+    saveResponse = Promise.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(id).toHaveValue(""));
   });
 
   it("shows mutation errors", async () => {

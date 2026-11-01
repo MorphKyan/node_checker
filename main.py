@@ -7,9 +7,11 @@ from module_exporter import ResultExporter
 from module_subscription_exporter import SubscriptionExporter
 from module_subscription_service import SubscriptionRefreshService
 from module_api_store import ApiStore
+from module_runtime_settings import RuntimeSettings
 
 
 async def main():
+    RuntimeSettings.load()
     await asyncio.to_thread(setup_core)
     
     sub_url = input("Enter subscription URL or file path (leave empty for inputs/test.txt): ").strip()

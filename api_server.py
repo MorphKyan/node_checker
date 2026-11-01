@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal, Optional
@@ -19,7 +20,16 @@ async def lifespan(app: FastAPI):
     RuntimeSettings.load()
     ApiStore.load_config()
     ApiStore.fail_stale_active_jobs("API server restarted before refresh completed")
-    yield
+    try:
+        yield
+    finally:
+        tasks = list(SubscriptionRefreshService._running_tasks.items())
+        for job_id, task in tasks:
+            SubscriptionRefreshService._running_tasks.pop(job_id, None)
+            task.cancel()
+        await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
+        for job_id, _ in tasks:
+            ApiStore.cancel_job(job_id, "API server stopped before refresh completed")
 
 
 app = FastAPI(title="Node Checker API", lifespan=lifespan)
@@ -338,10 +348,12 @@ async def get_subscription(subscription_id: str) -> dict:
 
 @app.patch("/subscriptions/{subscription_id}")
 async def update_subscription(subscription_id: str, payload: SubscriptionUpdateRequest) -> dict:
-    ensure_subscription(subscription_id)
+    subscription = ensure_subscription(subscription_id)
     data = payload.model_dump(exclude_unset=True, exclude_none=True)
     if not data:
         raise HTTPException(status_code=422, detail="No fields to update")
+    if "url" in data and data["url"] != subscription["url"]:
+        SubscriptionRefreshService.cancel_subscription_refreshes(subscription_id)
     updated = ApiStore.update_subscription(subscription_id, **data)
     if not updated:
         raise HTTPException(status_code=404, detail="Subscription not found")

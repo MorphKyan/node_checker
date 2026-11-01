@@ -3,6 +3,7 @@ import hashlib
 import json
 import time
 from dataclasses import asdict
+from math import isfinite
 from pathlib import Path
 
 from models import ProbeData, ProxyNode
@@ -33,10 +34,9 @@ class ProbeCache:
         snapshot = ApiStore.get_probe_config_snapshot(probe_config, api_sites)
         path = cls._path(node, cls.config_signature(probe_config=snapshot))
         data = ApiStore._read_json(path)
-        if not isinstance(data, dict) or data.get("expires_at", 0) < time.time():
-            path.unlink(missing_ok=True)
-            return None
         try:
+            if not isinstance(data, dict) or not isfinite(data.get("expires_at", 0)) or data.get("expires_at", 0) <= time.time():
+                raise ValueError("Invalid or expired cache entry")
             return restore_probe_data(data["probe"])
         except (KeyError, TypeError, ValueError):
             path.unlink(missing_ok=True)

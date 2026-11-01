@@ -97,11 +97,10 @@ class RuntimeSettings:
                 continue
             validated[key] = cls.validate_value(key, value)
 
-        for key, value in validated.items():
-            setattr(settings, key, value)
-
-        current = cls.get_editable()
+        current = {**cls.get_editable(), **validated}
         if persist:
             from module_api_store import ApiStore
             ApiStore.save_runtime_settings(current)
+        for key, value in validated.items():
+            setattr(settings, key, value)
         return current

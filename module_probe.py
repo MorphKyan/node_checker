@@ -53,8 +53,10 @@ class LightweightProbe:
             connector = ProxyConnector.from_url(socks5_url, rdns=True)
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get("https://api6.ipify.org?format=json", timeout=settings.API_TIMEOUT) as response:
+                    if response.status != 200:
+                        return False, ""
                     data = await response.json()
-                    return response.status == 200, str(data.get("ip", ""))
+                    return True, str(ipaddress.IPv6Address(data.get("ip", "")))
         except Exception:
             return False, ""
 

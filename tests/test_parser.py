@@ -11,6 +11,14 @@ from settings import settings
 
 
 class NodeParserTests(unittest.TestCase):
+    def test_country_codes_do_not_match_inside_other_words(self):
+        for remark in ("Russia", "Ukraine", "Premium", "Sydney"):
+            with self.subTest(remark=remark):
+                self.assertEqual(NodeParser._match_geo(remark), "Unknown")
+        for remark, geo in (("US01", "US"), ("node_US_01", "US"), ("日本-01", "JP"), ("UK London", "GB")):
+            with self.subTest(remark=remark):
+                self.assertEqual(NodeParser._match_geo(remark), geo)
+
     def test_shared_endpoint_parsing_preserves_credentials_and_uri(self):
         for scheme, parser in (("vless", NodeParser.parse_vless_line),
                                ("hy2", NodeParser.parse_hy2_line),
@@ -32,7 +40,7 @@ class NodeParserTests(unittest.TestCase):
         for scheme, parser in (("vless", NodeParser.parse_vless_line),
                                ("hy2", NodeParser.parse_hy2_line),
                                ("hysteria2", NodeParser.parse_hy2_line)):
-            for address in ("host", ":443", "host:bad", "host:65536", "[invalid]:443"):
+            for address in ("host", ":443", "host:0", "host:bad", "host:65536", "[invalid]:443"):
                 with self.subTest(scheme=scheme, address=address), self.assertRaises(ValueError):
                     parser(f"{scheme}://secret@{address}")
 

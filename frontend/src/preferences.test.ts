@@ -29,3 +29,10 @@ it("discards the removed export format preference", () => {
   expect(loadPreferences()).not.toHaveProperty("defaultExportFormat");
   expect(JSON.parse(localStorage.getItem("node-checker.preferences")!)).not.toHaveProperty("defaultExportFormat");
 });
+
+it.each([0, -2, 1.5, "20", null])("rejects an invalid saved page size (%s)", (pageSize) => {
+  localStorage.setItem("node-checker.preferences", JSON.stringify({
+    apiBaseUrl: 123, autoRefresh: "false", defaultExportMode: "removed", pageSize, autoRefreshVersion: 1,
+  }));
+  expect(loadPreferences()).toEqual(defaultPreferences);
+});

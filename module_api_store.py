@@ -13,6 +13,7 @@ import time
 import uuid
 from copy import deepcopy
 from dataclasses import asdict
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -36,9 +37,8 @@ API_PROVIDERS = ["ipwhois", "ipapi", "scamalytics", "proxycheck", "abstract", "i
 
 
 class ApiStore:
+    # One lock keeps job, subscription and result transitions consistent.
     _config_lock = threading.RLock()
-    _job_locks: dict[str, threading.RLock] = {}
-    _result_locks: dict[str, threading.RLock] = {}
 
     @staticmethod
     def _atomic_write(path: Path, value: Any) -> None:
@@ -156,8 +156,8 @@ class ApiStore:
             site["weight"] = float(site.get("weight", 1.0))
         except (TypeError, ValueError):
             raise ValueError("weight must be a number")
-        if site["weight"] <= 0:
-            raise ValueError("weight must be greater than zero")
+        if not isfinite(site["weight"]) or site["weight"] <= 0:
+            raise ValueError("weight must be finite and greater than zero")
         site["enabled"] = bool(site.get("enabled", False))
         if site["enabled"] and "{key}" in template and not str(site.get("api_key", "")):
             raise ValueError("an API key is required before enabling this site")
@@ -170,9 +170,9 @@ class ApiStore:
         with cls._config_lock:
             config = cls.load_config()
             sites = config["api_sites"]
-            if any(s.get("id") == data.get("id") for s in sites):
-                raise ValueError("site id already exists")
             site = cls._validate_site(data)
+            if any(s.get("id") == site["id"] for s in sites):
+                raise ValueError("site id already exists")
             site["order"] = len(sites)
             site["api_key"] = str(data.get("api_key") or "")
             sites.append(site)
@@ -289,14 +289,6 @@ class ApiStore:
         return rows
 
     @classmethod
-    def _job_lock(cls, job_id: str) -> threading.RLock:
-        with cls._config_lock: return cls._job_locks.setdefault(job_id, threading.RLock())
-
-    @classmethod
-    def _result_lock(cls, subscription_id: str) -> threading.RLock:
-        with cls._config_lock: return cls._result_locks.setdefault(subscription_id, threading.RLock())
-
-    @classmethod
     def find_active_job(cls, subscription_id: str) -> dict | None:
         jobs = [cls._read_json(p, {}) for p in (Path(settings.DATA_DIR) / "jobs").glob("*.json")]
         active = [j for j in jobs if j.get("subscription_id") == subscription_id and j.get("status") in {"queued", "running"}]
@@ -340,27 +332,25 @@ class ApiStore:
 
     @classmethod
     def update_job(cls, job_id: str, **updates: Any) -> None:
-        with cls._job_lock(job_id):
+        with cls._config_lock:
             job = cls._read_json((Path(settings.DATA_DIR) / "jobs" / f"{job_id}.json"))
-            if not isinstance(job, dict): return
+            if not isinstance(job, dict) or job.get("status") not in {"queued", "running"}:
+                return
             for key, value in updates.items():
                 if value is not None: job[key] = value
             cls._atomic_write((Path(settings.DATA_DIR) / "jobs" / f"{job_id}.json"), job)
             if updates.get("status") is not None:
-                with cls._config_lock:
-                    config = cls.load_config()
-                    for sub in config["subscriptions"]:
-                        if sub["id"] == job["subscription_id"] and sub.get("last_job_id") == job_id:
-                            sub.update(last_status=job["status"], updated_at=int(time.time()))
-                    cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
+                config = cls.load_config()
+                for sub in config["subscriptions"]:
+                    if sub["id"] == job["subscription_id"] and sub.get("last_job_id") == job_id:
+                        sub.update(last_status=job["status"], updated_at=int(time.time()))
+                cls._atomic_write(Path(settings.DATA_DIR) / "config.json", config)
 
     @classmethod
     def cancel_job(cls, job_id: str, reason: str = "Canceled by user") -> dict | None:
-        job = cls.get_job(job_id)
-        if not job: return None
-        if job.get("status") in {"queued", "running"}:
+        with cls._config_lock:
             cls.update_job(job_id, status="canceled", phase="canceled", error=reason, finished_at=int(time.time()))
-        return cls.get_job(job_id)
+            return cls.get_job(job_id)
 
     @classmethod
     def fail_stale_active_jobs(cls, reason: str) -> int:
@@ -379,11 +369,12 @@ class ApiStore:
 
     @classmethod
     def save_results(cls, subscription_id: str, nodes: list[TestedNode], api_sites_snapshot: list[dict] | None = None) -> None:
-        with cls._result_lock(subscription_id): cls._atomic_write((Path(settings.DATA_DIR) / "results" / f"{subscription_id}.json"), cls._result_payload(subscription_id, nodes, api_sites_snapshot))
+        with cls._config_lock:
+            cls._atomic_write((Path(settings.DATA_DIR) / "results" / f"{subscription_id}.json"), cls._result_payload(subscription_id, nodes, api_sites_snapshot))
 
     @classmethod
     def save_results_if_current(cls, subscription_id: str, job_id: str, expected_url: str, nodes: list[TestedNode]) -> bool:
-        with cls._result_lock(subscription_id):
+        with cls._config_lock:
             sub = cls.get_subscription(subscription_id)
             job = cls.get_job(job_id)
             if not sub or not job or sub.get("url") != expected_url or sub.get("last_job_id") != job_id or job.get("status") != "running": return False

@@ -134,13 +134,14 @@ class AsyncAuditRegressionTests(unittest.IsolatedAsyncioTestCase):
         node = tested_node().analyzed_node.node
         for core, command in (("sing-box", ["sing-box", "run", "-c", "core.json"]),
                               ("xray", ["xray", "-c", "core.json"])):
-            process = MagicMock()
+            process = MagicMock(returncode=None)
             with self.subTest(core=core), \
                  patch.object(settings, "PROXY_CORE", core), \
                  patch.object(settings, "TUNNEL_START_DELAY", 0), \
                  patch.object(TunnelController, "generate_singbox_config", return_value="core.json") as singbox, \
                  patch.object(TunnelController, "generate_xray_config", return_value="core.json") as xray, \
                  patch("module_tunnel.os.path.exists", return_value=False), \
+                 patch("module_tunnel.shutil.which", return_value=None), \
                  patch("module_tunnel.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn:
                 self.assertEqual(await TunnelController.start_tunnel(node, 10001), (process, "core.json"))
                 self.assertEqual(spawn.await_args.args, tuple(command))
@@ -178,7 +179,7 @@ class AsyncAuditRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_during_startup_stops_child_and_removes_config(self):
         started = asyncio.Event()
-        process = MagicMock()
+        process = MagicMock(returncode=None)
         process.wait = AsyncMock()
         async def spawn(*args, **kwargs):
             started.set()

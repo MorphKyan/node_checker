@@ -1,4 +1,5 @@
 import base64
+import re
 import urllib.parse
 from models import ProxyNode, VlessNode, Hy2Node, SsNode
 import aiohttp
@@ -54,7 +55,10 @@ class NodeParser:
     def _match_geo(remark: str) -> str:
         remark_lower = remark.lower()
         for key, geo in GEO_MAP.items():
-            if key in remark_lower:
+            # Short country codes must not match words such as Russia or Ukraine.
+            matches = (re.search(rf"(?<![a-z]){key}(?![a-z])", remark_lower)
+                       if key.isascii() and len(key) <= 3 else key in remark_lower)
+            if matches:
                 return geo
         return "Unknown"
 
@@ -64,7 +68,7 @@ class NodeParser:
         credentials, server_params = main.partition('://')[2].split('@', 1)
         server, _, query = server_params.partition('?')
         endpoint = urllib.parse.urlsplit(f"//{server}")
-        if not endpoint.hostname or endpoint.port is None:
+        if not endpoint.hostname or not endpoint.port:
             raise ValueError("Missing server host or port")
         return (credentials, endpoint.hostname, endpoint.port,
                 dict(urllib.parse.parse_qsl(query)), urllib.parse.unquote(fragment))

@@ -171,6 +171,17 @@ class SubscriptionRefreshService:
         processed = 0
         route_probe = EntranceRouteProbe()
 
+        async def run_batch(coroutines):
+            tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
+            try:
+                return await asyncio.gather(*tasks)
+            except BaseException:
+                # A failed progress write must also stop and reap sibling tunnels.
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+
         async def filter_with_progress(node: ProxyNode) -> AnalyzedNode:
             nonlocal processed
             result = await cls.process_node_filter(node, cls.limit("FILTER_CONCURRENCY"), force_probe=force_probe, probe_config=probe_config, route_probe=route_probe)
@@ -179,9 +190,7 @@ class SubscriptionRefreshService:
                 progress_callback("filter", processed, len(nodes))
             return result
 
-        analyzed_nodes = await asyncio.gather(
-            *(filter_with_progress(node) for node in nodes)
-        )
+        analyzed_nodes = await run_batch(filter_with_progress(node) for node in nodes)
 
         speed_processed = 0
         coarse_nodes = [node for node in analyzed_nodes if node.is_valid] if speedtest_limit > 0 else []
@@ -198,14 +207,14 @@ class SubscriptionRefreshService:
                 progress_callback("speedtest", speed_processed, speed_total)
             return result
 
-        coarse_results = await asyncio.gather(*(speed_with_progress(node) for node in coarse_nodes))
+        coarse_results = await run_batch(speed_with_progress(node) for node in coarse_nodes)
         nodes_to_test, nodes_to_skip = cls.select_speedtest_nodes_per_region(
             analyzed_nodes, speedtest_limit, coarse_results if speedtest_limit > 0 else None,
         )
         speed_total += len(nodes_to_test)
         if progress_callback:
             progress_callback("speedtest", speed_processed, speed_total)
-        tested_nodes = await asyncio.gather(*(speed_with_progress(node, precise=True) for node in nodes_to_test))
+        tested_nodes = await run_batch(speed_with_progress(node, precise=True) for node in nodes_to_test)
         tested_nodes.extend(TestedNode(node, None, "not_tested") for node in nodes_to_skip)
         return tested_nodes
 
@@ -223,6 +232,9 @@ class SubscriptionRefreshService:
         subscription = ApiStore.get_subscription(subscription_id)
         if not subscription:
             raise ValueError(f"Subscription not found: {subscription_id}")
+        job = ApiStore.get_job(job_id)
+        if not job or job["status"] not in {"queued", "running"} or subscription.get("last_job_id") != job_id:
+            raise ValueError("Refresh job is no longer current; discarding results")
         subscription_url = subscription["url"]
 
         ApiStore.update_job(
@@ -243,9 +255,6 @@ class SubscriptionRefreshService:
 
         ApiStore.update_job(job_id, phase="filter", total_nodes=len(nodes), processed_nodes=0)
 
-        job = ApiStore.get_job(job_id)
-        if not job:
-            raise ValueError("Refresh job no longer exists")
         probe_config = job.get("probe_config_snapshot") or {
             "api_sites": job.get("api_sites_snapshot", []),
             "exit_ip_endpoint": job.get("exit_ip_endpoint_snapshot") or ApiStore.get_exit_ip_endpoint(),
@@ -277,10 +286,10 @@ class SubscriptionRefreshService:
 
     @classmethod
     async def run_job(cls, job_id: str) -> None:
-        job = ApiStore.get_job(job_id)
-        if not job:
-            return
         try:
+            job = ApiStore.get_job(job_id)
+            if not job or job["status"] != "queued":
+                return
             await cls.run_subscription_refresh(
                 job["subscription_id"],
                 job_id,

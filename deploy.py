@@ -1,6 +1,7 @@
 import os
 import zipfile
 import subprocess
+from pathlib import Path
 
 def build_frontend():
     print("Building frontend locally...")
@@ -13,6 +14,7 @@ def build_frontend():
     print("Frontend build completed successfully.")
 
 def create_archive(zip_filename="node_checker.zip"):
+    archive_path = Path(zip_filename).resolve()
     exclude_dirs = {
         ".git", ".github", "venv", ".pytest_cache", "__pycache__", 
         "node_modules", "cache", "result", "data", "inputs", "dist-cache"
@@ -30,6 +32,8 @@ def create_archive(zip_filename="node_checker.zip"):
                 if file.startswith(".env") or file in exclude_files or file.endswith('.pyc') or file.endswith('.log'):
                     continue
                 file_path = os.path.join(root, file)
+                if Path(file_path).resolve() == archive_path:
+                    continue
                 arcname = os.path.relpath(file_path, '.')
                 zipf.write(file_path, arcname)
     print(f"Created archive: {zip_filename}")

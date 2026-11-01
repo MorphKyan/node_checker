@@ -69,11 +69,11 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
 
 const chartColors = ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#64748b"];
 
-async function copyText(text: string): Promise<void> {
+async function copyText(text: string): Promise<boolean> {
   if (navigator.clipboard && window.isSecureContext) {
     try {
       await navigator.clipboard.writeText(text);
-      return;
+      return true;
     } catch (e) {
       console.warn("Failed to copy using clipboard API, trying fallback:", e);
     }
@@ -88,11 +88,12 @@ async function copyText(text: string): Promise<void> {
   textArea.focus();
   textArea.select();
   try {
-    document.execCommand("copy");
-  } catch (err) {
-    console.error("Fallback copy failed:", err);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textArea);
   }
-  document.body.removeChild(textArea);
 }
 
 function downloadText(filename: string, text: string): void {
@@ -208,7 +209,10 @@ export default function App() {
     },
     onError: (error) => setOperationError(errorMessage(error)),
   });
-  const refreshApiSites = () => void queryClient.invalidateQueries({ queryKey: ["api-sites"] });
+  const refreshApiSites = () => {
+    setOperationError("");
+    void queryClient.invalidateQueries({ queryKey: ["api-sites"] });
+  };
   const createApiSite = useMutation({ mutationFn: api.createApiSite, onSuccess: refreshApiSites, onError: (error) => setOperationError(errorMessage(error)) });
   const updateApiSite = useMutation({ mutationFn: ({ id, input }: { id: string; input: Partial<ApiSiteInput> }) => api.updateApiSite(id, input), onSuccess: refreshApiSites, onError: (error) => setOperationError(errorMessage(error)) });
   const deleteApiSite = useMutation({ mutationFn: api.deleteApiSite, onSuccess: refreshApiSites, onError: (error) => setOperationError(errorMessage(error)) });
@@ -334,7 +338,18 @@ export default function App() {
             />
           )}
 
-          {view === "api-sites" && <ApiSitesView sites={apiSites.data?.sites || []} exitIpEndpoint={apiSites.data?.exit_ip_endpoint || ""} providers={providers.data || []} onCreate={(input) => createApiSite.mutate(input)} onUpdate={(id, input) => updateApiSite.mutate({ id, input })} onDelete={(id) => deleteApiSite.mutate(id)} onOrder={(ids) => orderApiSites.mutate(ids)} onUpdateEndpoint={(value) => updateExitIpEndpoint.mutate(value)} />}
+          {view === "api-sites" && (
+            <ApiSitesView
+              sites={apiSites.data?.sites || []}
+              exitIpEndpoint={apiSites.data?.exit_ip_endpoint || ""}
+              providers={providers.data || []}
+              onCreate={(input, onSuccess) => createApiSite.mutate(input, { onSuccess })}
+              onUpdate={(id, input, onSuccess) => updateApiSite.mutate({ id, input }, { onSuccess })}
+              onDelete={(id) => deleteApiSite.mutate(id)}
+              onOrder={(ids) => orderApiSites.mutate(ids)}
+              onUpdateEndpoint={(value) => updateExitIpEndpoint.mutate(value)}
+            />
+          )}
 
           {view === "nodes" && (
             <NodesView
@@ -390,7 +405,7 @@ export default function App() {
               settings={settingsQuery.data}
               metadata={settingsMetadataQuery.data}
               preferences={preferences}
-              onSaveSettings={(next) => updateSettings.mutate(next)}
+              onSaveSettings={(next, onSuccess) => updateSettings.mutate(next, { onSuccess })}
               onPreferences={setPreferences}
               onReset={() => void settingsQuery.refetch()}
             />
@@ -568,21 +583,26 @@ function ApiSitesView(props: {
   sites: ApiSite[];
   exitIpEndpoint: string;
   providers: string[];
-  onCreate: (input: ApiSiteInput) => void;
-  onUpdate: (id: string, input: Partial<ApiSiteInput>) => void;
+  onCreate: (input: ApiSiteInput, onSuccess: () => void) => void;
+  onUpdate: (id: string, input: Partial<ApiSiteInput>, onSuccess?: () => void) => void;
   onDelete: (id: string) => void;
   onOrder: (ids: string[]) => void;
   onUpdateEndpoint: (value: string) => void;
 }) {
   const blank = (): ApiSiteInput => ({ id: "", column_name: "", provider: props.providers[0] || "ipwhois", url_template: "https://example.com/{ip}", api_key: "", weight: 1, enabled: false });
   const [draft, setDraft] = useState<ApiSiteInput>(blank);
+  const currentDraft = useRef(draft);
+  currentDraft.current = draft;
   const [editing, setEditing] = useState<string | null>(null);
   const [endpoint, setEndpoint] = useState(props.exitIpEndpoint);
   useEffect(() => setEndpoint(props.exitIpEndpoint), [props.exitIpEndpoint]);
   const save = () => {
-    if (editing) props.onUpdate(editing, draft);
-    else props.onCreate(draft);
-    setEditing(null); setDraft(blank());
+    const reset = () => {
+      if (currentDraft.current !== draft) return;
+      setEditing(null); setDraft(blank());
+    };
+    if (editing) props.onUpdate(editing, draft, reset);
+    else props.onCreate(draft, reset);
   };
   const begin = (site: ApiSite) => {
     setEditing(site.id);
@@ -640,6 +660,7 @@ export function NodesView(props: {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   useEffect(() => { setExpandedGroups(new Set()); }, [props.selectedId]);
   const [copiedKey, setCopiedKey] = useState("");
+  const [copyError, setCopyError] = useState("");
   const [activeCopyDropdown, setActiveCopyDropdown] = useState<string | null>(null);
   const visibleSites = (props.sites ?? props.result?.api_sites_snapshot ?? []).filter((site) => site.enabled);
   const columns: Array<[NodeSortKey, string]> = [
@@ -659,7 +680,12 @@ export function NodesView(props: {
   }, []);
 
   async function copyNodeUri(key: string, uri: string) {
-    await copyText(uri);
+    if (!await copyText(uri)) {
+      setCopiedKey("");
+      setCopyError("复制失败，请手动选择文本复制。");
+      return;
+    }
+    setCopyError("");
     setCopiedKey(key);
     window.setTimeout(() => {
       setCopiedKey((current) => (current === key ? "" : current));
@@ -697,6 +723,7 @@ export function NodesView(props: {
           <div className="text-sm font-semibold text-slate-900">出口分组 · {groups.length} 组 · {props.filteredNodes.length} 个节点</div>
           <div className="text-xs text-slate-500">每页 {props.pageSize} 组</div>
         </div>
+        {copyError && <div role="alert" className="mb-2 text-sm text-red-600">{copyError}</div>}
         {!props.result ? <EmptyState title="暂无检测结果" detail="订阅完成刷新后会在这里展示节点详情。" /> : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1280px] text-left text-sm">
@@ -859,6 +886,10 @@ function ExportView(props: {
   onPreview: () => void;
 }) {
   const url = props.selectedId ? enhancedUrl(props.apiBaseUrl, props.selectedId, { mode: props.mode, valid_only: props.validOnly }) : "";
+  const [copyError, setCopyError] = useState("");
+  async function copy(value: string) {
+    setCopyError(await copyText(value) ? "" : "复制失败，请手动选择文本复制。");
+  }
   return (
     <div className="space-y-4">
       <Panel>
@@ -866,12 +897,13 @@ function ExportView(props: {
           <FilterSelect label="订阅" value={props.selectedId} onChange={props.onSelect} options={props.subscriptions.map((item) => [item.id, item.name])} />
           <FilterSelect label="命名模式" value={props.mode} onChange={(value) => isExportMode(value) && props.onMode(value)} options={[["compact", "compact"], ["detailed", "detailed"]]} />
           <div><Label>有效节点</Label><Select className="mt-1 w-full" value={String(props.validOnly)} onChange={(event) => props.onValidOnly(event.target.value === "true")}><option value="true">只导出有效</option><option value="false">包含失败</option></Select></div>
-          <div className="flex items-end gap-2"><Button disabled={!props.selectedId} onClick={props.onPreview}><Search className="h-4 w-4" />预览</Button><Button variant="secondary" onClick={() => copyText(url)}><ExternalLink className="h-4 w-4" />复制 URL</Button></div>
+          <div className="flex items-end gap-2"><Button disabled={!props.selectedId} onClick={props.onPreview}><Search className="h-4 w-4" />预览</Button><Button variant="secondary" disabled={!props.selectedId} onClick={() => void copy(url)}><ExternalLink className="h-4 w-4" />复制 URL</Button></div>
         </div>
       </Panel>
       <Panel>
-        <div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">订阅内容（单行 Base64）</div><div className="flex gap-2"><Button variant="secondary" disabled={!props.preview} onClick={() => copyText(props.preview)}><Clipboard className="h-4 w-4" />复制内容</Button><Button variant="secondary" disabled={!props.preview} onClick={() => downloadText(`enhanced_${props.mode}_base64.txt`, props.preview)}><Download className="h-4 w-4" />下载</Button></div></div>
+        <div className="mb-3 flex items-center justify-between"><div className="text-sm font-semibold">订阅内容（单行 Base64）</div><div className="flex gap-2"><Button variant="secondary" disabled={!props.preview} onClick={() => void copy(props.preview)}><Clipboard className="h-4 w-4" />复制内容</Button><Button variant="secondary" disabled={!props.preview} onClick={() => downloadText(`enhanced_${props.mode}_base64.txt`, props.preview)}><Download className="h-4 w-4" />下载</Button></div></div>
         {props.error && <div role="alert" className="mb-2 text-sm text-red-600">{props.error}</div>}
+        {copyError && <div role="alert" className="mb-2 text-sm text-red-600">{copyError}</div>}
         <textarea className="h-96 w-full rounded-md border border-border bg-slate-950 p-3 font-mono text-xs text-slate-50" value={props.preview} readOnly placeholder="点击预览后显示增强订阅内容" />
       </Panel>
       <Panel><div className="text-sm font-semibold">命名示例</div><div className="mt-2 space-y-2 text-sm text-slate-600"><div>🇯🇵 JP | 机房 | Clean | 风险 10 | 210ms</div><div>🇯🇵 JP | 机房 | Clean | 风险 10 | 80ms/210ms | 12.34Mbps | Example ASN | JP</div></div></Panel>
@@ -879,7 +911,7 @@ function ExportView(props: {
   );
 }
 
-function SettingsView({ settings, metadata, preferences, onSaveSettings, onPreferences, onReset }: { settings?: RuntimeSettings; metadata?: RuntimeSettingsMetadata; preferences: LocalPreferences; onSaveSettings: (settings: Partial<RuntimeSettings>) => void; onPreferences: (preferences: LocalPreferences) => void; onReset: () => void }) {
+function SettingsView({ settings, metadata, preferences, onSaveSettings, onPreferences, onReset }: { settings?: RuntimeSettings; metadata?: RuntimeSettingsMetadata; preferences: LocalPreferences; onSaveSettings: (settings: Partial<RuntimeSettings>, onSuccess: () => void) => void; onPreferences: (preferences: LocalPreferences) => void; onReset: () => void }) {
   const [draft, setDraft] = useState<Partial<RuntimeSettings>>({});
   const current = { ...(settings || {}), ...draft } as RuntimeSettings;
   const hasDraft = Object.keys(draft).length > 0;
@@ -912,7 +944,7 @@ function SettingsView({ settings, metadata, preferences, onSaveSettings, onPrefe
             <div><Label>代理内核</Label><Select className="mt-1 w-full" value={current.PROXY_CORE || "sing-box"} onChange={(event) => setDraft({ ...draft, PROXY_CORE: event.target.value })}><option value="sing-box">Sing-box</option><option value="xray">Xray</option></Select></div>
             <div className="col-span-2"><Label>TTFB URL</Label><Input className="mt-1" value={current.TTFB_TARGET_URL || ""} onChange={(event) => setDraft({ ...draft, TTFB_TARGET_URL: event.target.value })} /></div>
             <div className="col-span-2"><Label>测速 URL</Label><Input className="mt-1" value={current.SPEEDTEST_URL || ""} onChange={(event) => setDraft({ ...draft, SPEEDTEST_URL: event.target.value })} /></div>
-            <div className="col-span-2 flex justify-end gap-2"><Button variant="secondary" onClick={() => { setDraft({}); onReset(); }}>重置</Button><Button disabled={!hasDraft} onClick={() => { if (!hasDraft) return; onSaveSettings(draft); setDraft({}); }}><Save className="h-4 w-4" />保存设置</Button></div>
+            <div className="col-span-2 flex justify-end gap-2"><Button variant="secondary" onClick={() => { setDraft({}); onReset(); }}>重置</Button><Button disabled={!hasDraft} onClick={() => onSaveSettings(draft, () => setDraft((current) => current === draft ? {} : current))}><Save className="h-4 w-4" />保存设置</Button></div>
           </div>
         )}
       </Panel>
@@ -922,7 +954,7 @@ function SettingsView({ settings, metadata, preferences, onSaveSettings, onPrefe
           <div><Label>API Base URL</Label><Input className="mt-1" value={preferences.apiBaseUrl} onChange={(event) => onPreferences({ ...preferences, apiBaseUrl: event.target.value })} placeholder="留空表示同源或 Vite 代理" /></div>
           <div><Label>自动刷新</Label><Select className="mt-1 w-full" value={String(preferences.autoRefresh)} onChange={(event) => onPreferences({ ...preferences, autoRefresh: event.target.value === "true" })}><option value="true">开启</option><option value="false">关闭</option></Select></div>
           <div><Label>默认导出模式</Label><Select className="mt-1 w-full" value={preferences.defaultExportMode} onChange={(event) => isExportMode(event.target.value) && onPreferences({ ...preferences, defaultExportMode: event.target.value })}><option value="compact">compact</option><option value="detailed">detailed</option></Select></div>
-          <div><Label>表格每页数量</Label><Input className="mt-1" type="number" value={preferences.pageSize} onChange={(event) => onPreferences({ ...preferences, pageSize: Number(event.target.value) || defaultPreferences.pageSize })} /></div>
+          <div><Label>表格每页数量</Label><Input className="mt-1" type="number" min="1" step="1" value={preferences.pageSize} onChange={(event) => onPreferences({ ...preferences, pageSize: Math.max(1, Math.trunc(Number(event.target.value) || defaultPreferences.pageSize)) })} /></div>
         </div>
       </Panel>
     </div>

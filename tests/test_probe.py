@@ -8,6 +8,25 @@ from settings import settings
 
 
 class LightweightProbeTests(unittest.TestCase):
+    def test_ipv6_requires_a_successful_response_with_an_ipv6_address(self):
+        async def run_case():
+            for status, data, expected in (
+                (200, {}, (False, "")),
+                (200, {"ip": "1.1.1.1"}, (False, "")),
+                (200, {"ip": "invalid"}, (False, "")),
+                (503, {"ip": "2001:db8::1"}, (False, "")),
+                (200, {"ip": "2001:db8::1"}, (True, "2001:db8::1")),
+            ):
+                with self.subTest(status=status, data=data):
+                    response = MagicMock(status=status)
+                    response.json = AsyncMock(return_value=data)
+                    session = MagicMock()
+                    session.get.return_value.__aenter__.return_value = response
+                    with patch("module_probe.ProxyConnector.from_url"), patch("module_probe.aiohttp.ClientSession") as client:
+                        client.return_value.__aenter__.return_value = session
+                        self.assertEqual(await LightweightProbe.detect_ipv6("socks5://unused"), expected)
+        asyncio.run(run_case())
+
     def test_source_responses_survive_normalization_and_adapter_errors(self):
         site = {"id": "coffee", "provider": "netcoffee"}
         for data in ({"trust_score": 72, "ai_verdict": {"reasoning": "original"}},

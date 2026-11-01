@@ -1,5 +1,6 @@
 import os
 import re
+from pathlib import Path
 from models import TestedNode, Hy2Node, SsNode
 from module_node_identity import make_node_fingerprint
 from module_subscription_exporter import SubscriptionExporter, get_visual_width
@@ -21,13 +22,6 @@ class ResultExporter:
 
     @staticmethod
     def export_markdown_report(nodes: list[TestedNode], base_dir: str = "result"):
-        import shutil
-        if os.path.exists(base_dir):
-            try:
-                shutil.rmtree(base_dir)
-            except Exception as e:
-                print(f"[Exporter] Warning: Failed to clear old results: {e}")
-                
         os.makedirs(base_dir, exist_ok=True)
         details_dir = os.path.join(base_dir, "node_details")
         os.makedirs(details_dir, exist_ok=True)
@@ -76,14 +70,17 @@ class ResultExporter:
         for row in rows:
             lines.append(format_row(row))
             
+        detail_paths = set()
         for tn in sorted_nodes:
             an = tn.analyzed_node
             probe = an.probe
             
             # Write detailed report for each node
-            safe_remark = re.sub(r'[\\/*?:"<>|]', "_", an.node.remark or "Unnamed")
-            safe_remark = f"{safe_remark[:80]}_{make_node_fingerprint(an.node)[:16]}"
+            safe_remark = re.sub(r'[\\/*?:"<>|\x00-\x1f\x7f]', "_", an.node.remark or "Unnamed")
+            # Leave room for four-byte Unicode characters and the identity suffix.
+            safe_remark = f"{safe_remark[:48]}_{make_node_fingerprint(an.node)[:16]}"
             detail_path = os.path.join(details_dir, f"{safe_remark}.md")
+            detail_paths.add(Path(detail_path))
             
             node_protocol = getattr(an.node, "protocol", "vless").upper()
             if isinstance(an.node, SsNode):
@@ -152,6 +149,10 @@ class ResultExporter:
             
         with open(report_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
+
+        for path in Path(details_dir).glob("*.md"):
+            if path not in detail_paths:
+                path.unlink()
         
         print(f"[Exporter] Report saved to {report_path}")
         print(f"[Exporter] Detailed node reports saved to {details_dir}")

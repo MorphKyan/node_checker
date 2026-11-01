@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from models import AnalyzedNode, NodeProfile, ProbeData, TestedNode, VlessNode
+from module_api_store import ApiStore
 from module_subscription_service import SubscriptionRefreshService
 from settings import settings
 
@@ -37,6 +38,60 @@ def make_analyzed_node(node: VlessNode, risk: float = 10.0, actual_geo: str | No
 
 
 class SubscriptionRefreshServiceTests(unittest.TestCase):
+    def test_speed_refresh_uses_saved_nodes_without_fetching_and_respects_limit(self):
+        analyzed = [make_analyzed_node(make_node(i, geo)) for i, geo in enumerate(["JP", "JP", "US", "US"])]
+        analyzed[-1].is_valid = False
+
+        async def run_case(limit):
+            with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory):
+                sub = ApiStore.create_subscription("https://subscription.test")
+                ApiStore.save_results(sub["id"], [TestedNode(item) for item in analyzed])
+
+                async def speed(node, *, precise=False):
+                    return TestedNode(node, 20.0 if precise else 10.0, "success")
+
+                with (
+                    patch("module_subscription_service.setup_core"),
+                    patch.object(SubscriptionRefreshService, "fetch_subscription_text") as fetch,
+                    patch("module_subscription_service.NodeParser.parse_nodes") as parse,
+                    patch.object(SubscriptionRefreshService, "process_node_filter", side_effect=analyzed) as probe,
+                    patch.object(SubscriptionRefreshService, "run_speed_test", side_effect=speed) as speedtest,
+                ):
+                    job = SubscriptionRefreshService.schedule_refresh(sub["id"], speedtest_limit=limit, refetch_subscription=False)
+                    await SubscriptionRefreshService._running_tasks[job["id"]]
+                    fetch.assert_not_called()
+                    parse.assert_not_called()
+                    self.assertEqual([call.args[0] for call in probe.call_args_list], [item.node for item in analyzed])
+                    self.assertEqual(speedtest.await_count, 5 if limit else 0)
+                    result = ApiStore.get_latest_result(sub["id"])
+                    self.assertEqual(len(result["nodes"]), 4)
+                    self.assertEqual(sum(item.download_speed_mbps is not None for item in result["nodes"]), 2 if limit else 0)
+                    self.assertEqual(ApiStore.get_job(job["id"])["status"], "completed")
+                    self.assertFalse(ApiStore.get_job(job["id"])["refetch_subscription"])
+
+        for limit in (0, 1):
+            with self.subTest(limit=limit):
+                asyncio.run(run_case(limit))
+
+    def test_normal_refresh_still_fetches_subscription(self):
+        analyzed = make_analyzed_node(make_node(1))
+
+        async def run_case():
+            with tempfile.TemporaryDirectory() as directory, patch.object(settings, "DATA_DIR", directory):
+                sub = ApiStore.create_subscription("https://subscription.test")
+                with (
+                    patch("module_subscription_service.setup_core"),
+                    patch.object(SubscriptionRefreshService, "fetch_subscription_text", return_value=analyzed.node.raw_uri) as fetch,
+                    patch.object(SubscriptionRefreshService, "process_node_filter", return_value=analyzed),
+                ):
+                    job = SubscriptionRefreshService.schedule_refresh(sub["id"], speedtest_limit=0)
+                    await SubscriptionRefreshService._running_tasks[job["id"]]
+                    fetch.assert_awaited_once_with(sub["url"])
+                    self.assertTrue(job["refetch_subscription"])
+                    self.assertEqual(ApiStore.get_job(job["id"])["status"], "completed")
+
+        asyncio.run(run_case())
+
     def test_run_nodes_without_speedtests_preserves_all_nodes(self):
         valid = make_analyzed_node(make_node(1))
         invalid = make_analyzed_node(make_node(2))

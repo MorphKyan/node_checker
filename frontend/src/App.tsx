@@ -201,8 +201,8 @@ export default function App() {
   });
 
   const refreshSubscription = useMutation({
-    mutationFn: ({ id, speedtest_limit, force_probe }: { id: string; speedtest_limit?: number; force_probe?: boolean }) =>
-      api.refreshSubscription(id, { speedtest_limit, force_probe }),
+    mutationFn: ({ id, speedtest_limit }: { id: string; speedtest_limit?: number }) =>
+      api.refreshSubscription(id, speedtest_limit === undefined ? {} : { speedtest_limit, refetch_subscription: false }),
     onSuccess: () => {
       setOperationError("");
       setView("jobs");
@@ -362,11 +362,7 @@ export default function App() {
               }}
               onSaveEdit={() => editingId && updateSubscription.mutate({ id: editingId, input: subscriptionForm })}
               onDelete={(id) => deleteSubscription.mutate(id)}
-              onRefresh={(id, speedtest_limit, force_probe) => refreshSubscription.mutate({ id, speedtest_limit, force_probe })}
-              onOpenNodes={(id) => {
-                setSelectedSubscriptionId(id);
-                setView("nodes");
-              }}
+              onRefresh={(id, speedtest_limit) => refreshSubscription.mutate({ id, speedtest_limit })}
               onOpenExport={(id) => {
                 setSelectedSubscriptionId(id);
                 setView("export");
@@ -548,12 +544,10 @@ function SubscriptionsView(props: {
   onCancelEdit: () => void;
   onSaveEdit: () => void;
   onDelete: (id: string) => void;
-  onRefresh: (id: string, speedtest_limit?: number, force_probe?: boolean) => void;
-  onOpenNodes: (id: string) => void;
+  onRefresh: (id: string, speedtest_limit?: number) => void;
   onOpenExport: (id: string) => void;
 }) {
   const [speedtestLimit, setSpeedtestLimit] = useState("1");
-  const [forceProbe, setForceProbe] = useState(false);
   return (
     <div className="space-y-4">
       <Panel>
@@ -595,11 +589,12 @@ function SubscriptionsView(props: {
                   <td className="px-3 py-3">
                     <div className="flex flex-wrap gap-2">
                       <Button variant="secondary" onClick={() => props.onRefresh(subscription.id)}>刷新</Button>
-                      <Input className="w-16" type="number" min="0" value={speedtestLimit} onChange={(event) => setSpeedtestLimit(event.target.value)} title="每区域测速数量" />
-                      <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={forceProbe} onChange={(event) => setForceProbe(event.target.checked)} />强制探测</label>
-                      <Button variant="secondary" onClick={() => props.onRefresh(subscription.id, Math.max(0, Number(speedtestLimit) || 0), forceProbe)}>测速刷新</Button>
+                      <label className="flex items-center gap-1 text-xs text-slate-600">
+                        每区域精测数量
+                        <Input className="w-16" type="number" min="0" max="100" step="1" value={speedtestLimit} onChange={(event) => setSpeedtestLimit(event.target.value)} title="决定每个区域参与精测的节点数量；大于 0 时所有有效节点先粗测，0 表示不测速。" />
+                      </label>
+                      <Button variant="secondary" title="使用已保存节点检测并测速，不重新拉取订阅" onClick={() => props.onRefresh(subscription.id, Math.min(100, Math.max(0, Math.trunc(Number(speedtestLimit) || 0))))}>测速刷新</Button>
                       <Button variant="ghost" onClick={() => props.onStartEdit(subscription)}>编辑</Button>
-                      <Button variant="ghost" onClick={() => props.onOpenNodes(subscription.id)}>节点</Button>
                       <Button variant="ghost" onClick={() => props.onOpenExport(subscription.id)}>导出</Button>
                       <Button variant="danger" onClick={() => props.onDelete(subscription.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>

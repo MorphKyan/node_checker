@@ -217,6 +217,7 @@ class SubscriptionRefreshService:
         *,
         speedtest_limit: int,
         force_probe: bool = False,
+        refetch_subscription: bool = True,
     ) -> list[TestedNode]:
         await asyncio.to_thread(setup_core)
         subscription = ApiStore.get_subscription(subscription_id)
@@ -227,14 +228,18 @@ class SubscriptionRefreshService:
         ApiStore.update_job(
             job_id,
             status="running",
-            phase="fetch",
+            phase="fetch" if refetch_subscription else "filter",
             started_at=int(time.time()),
         )
 
-        raw_text = await cls.fetch_subscription_text(subscription["url"])
-        nodes = NodeParser.parse_nodes(raw_text)
+        if refetch_subscription:
+            raw_text = await cls.fetch_subscription_text(subscription["url"])
+            nodes = NodeParser.parse_nodes(raw_text)
+        else:
+            result = ApiStore.get_latest_result(subscription_id)
+            nodes = [item.analyzed_node.node for item in result["nodes"]] if result else []
         if not nodes:
-            raise ValueError("No valid proxy nodes found in subscription")
+            raise ValueError("No valid proxy nodes found in subscription" if refetch_subscription else "暂无已保存节点，请先点击“刷新”拉取订阅")
 
         ApiStore.update_job(job_id, phase="filter", total_nodes=len(nodes), processed_nodes=0)
 
@@ -281,6 +286,7 @@ class SubscriptionRefreshService:
                 job_id,
                 speedtest_limit=job["speedtest_limit"],
                 force_probe=bool(job["force_probe"]),
+                refetch_subscription=job.get("refetch_subscription", True),
             )
         except asyncio.CancelledError:
             ApiStore.cancel_job(job_id)
@@ -303,6 +309,7 @@ class SubscriptionRefreshService:
         *,
         speedtest_limit: int | None = None,
         force_probe: bool = False,
+        refetch_subscription: bool = True,
     ) -> dict:
         subscription = ApiStore.get_subscription(subscription_id)
         if not subscription:
@@ -312,12 +319,18 @@ class SubscriptionRefreshService:
         if active_job:
             return active_job
 
+        if not refetch_subscription:
+            result = ApiStore.get_latest_result(subscription_id)
+            if not result or not result["nodes"]:
+                raise ValueError("暂无已保存节点，请先点击“刷新”拉取订阅")
+
         limit = settings.API_DEFAULT_SPEEDTEST_LIMIT if speedtest_limit is None else speedtest_limit
         job = ApiStore.create_refresh_job(
             subscription_id,
             speedtest_limit=max(0, int(limit)),
             force_probe=force_probe,
             probe_config_snapshot=ApiStore.get_probe_config_snapshot(),
+            refetch_subscription=refetch_subscription,
         )
         coro = cls.run_job(job["id"])
         try:

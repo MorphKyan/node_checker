@@ -47,6 +47,7 @@ class SubscriptionCreateRequest(BaseModel):
 class RefreshRequest(BaseModel):
     speedtest_limit: Optional[int] = Field(default=None, ge=0, le=100)
     force_probe: bool = False
+    refetch_subscription: bool = True
 
 
 class SubscriptionUpdateRequest(BaseModel):
@@ -120,15 +121,19 @@ def schedule_refresh_response(
     *,
     speedtest_limit: int | None = None,
     force_probe: bool = False,
+    refetch_subscription: bool = True,
 ) -> dict:
     try:
         job = SubscriptionRefreshService.schedule_refresh(
             subscription_id,
             speedtest_limit=speedtest_limit,
             force_probe=force_probe,
+            refetch_subscription=refetch_subscription,
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return {
         "subscription_id": job["subscription_id"],
         "job_id": job["id"],
@@ -435,6 +440,7 @@ async def refresh_subscription(subscription_id: str, payload: RefreshRequest | N
         subscription_id,
         speedtest_limit=payload.speedtest_limit,
         force_probe=payload.force_probe,
+        refetch_subscription=payload.refetch_subscription,
     )
 
 

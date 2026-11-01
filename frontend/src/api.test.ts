@@ -138,7 +138,7 @@ describe("api client", () => {
     await client.orderApiSites(["site", "other"]);
     await client.updateExitIpEndpoint("https://exit.example");
     await client.deleteApiSite("site");
-    await client.refreshSubscription("sub", { speedtest_limit: 2, force_probe: true });
+    await client.refreshSubscription("sub", { speedtest_limit: 2, refetch_subscription: false });
 
     const requests = (fetchMock.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit]>).map(([url, init]) => ({ url, method: init.method, body: init.body }));
     expect(requests).toEqual([
@@ -147,7 +147,7 @@ describe("api client", () => {
       { url: "http://api.local/api-sites/order", method: "PUT", body: JSON.stringify({ ids: ["site", "other"] }) },
       { url: "http://api.local/exit-ip-endpoint", method: "PATCH", body: JSON.stringify({ exit_ip_endpoint: "https://exit.example" }) },
       { url: "http://api.local/api-sites/site", method: "DELETE", body: undefined },
-      { url: "http://api.local/subscriptions/sub/refresh", method: "POST", body: JSON.stringify({ speedtest_limit: 2, force_probe: true }) },
+      { url: "http://api.local/subscriptions/sub/refresh", method: "POST", body: JSON.stringify({ speedtest_limit: 2, refetch_subscription: false }) },
     ]);
     vi.unstubAllGlobals();
   });

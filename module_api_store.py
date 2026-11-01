@@ -309,6 +309,7 @@ class ApiStore:
         api_sites_snapshot: list[dict] | None = None,
         exit_ip_endpoint_snapshot: str | None = None,
         probe_config_snapshot: dict[str, Any] | None = None,
+        refetch_subscription: bool = True,
     ) -> dict:
         with cls._config_lock:
             if not cls.get_subscription(subscription_id): raise KeyError(subscription_id)
@@ -322,6 +323,7 @@ class ApiStore:
             now = int(time.time())
             job_id = f"job_{uuid.uuid4().hex[:12]}"
             job = {"id": job_id, "subscription_id": subscription_id, "status": "queued", "phase": "queued", "processed_nodes": 0, "total_nodes": 0, "error": None, "speedtest_limit": int(speedtest_limit), "force_probe": bool(force_probe), "created_at": now, "started_at": None, "finished_at": None, "probe_config_snapshot": config_snapshot, "api_sites_snapshot": deepcopy(config_snapshot["api_sites"]), "exit_ip_endpoint_snapshot": config_snapshot["exit_ip_endpoint"]}
+            job["refetch_subscription"] = bool(refetch_subscription)
             cls._atomic_write((Path(settings.DATA_DIR) / "jobs" / f"{job_id}.json"), job)
             config = cls.load_config()
             for sub in config["subscriptions"]:

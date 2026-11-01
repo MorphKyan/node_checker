@@ -48,7 +48,7 @@ export interface ApiClient {
   createSubscription(input: { name?: string; url: string }): Promise<{ subscription_id: string; job_id: string; status: string }>;
   updateSubscription(id: string, input: { name?: string; url?: string }): Promise<SubscriptionSummary>;
   deleteSubscription(id: string): Promise<{ deleted: boolean; subscription_id: string }>;
-  refreshSubscription(id: string, input: { speedtest_limit?: number; force_probe?: boolean }): Promise<{ subscription_id: string; job_id: string; status: string }>;
+  refreshSubscription(id: string, input: { speedtest_limit?: number; force_probe?: boolean; refetch_subscription?: boolean }): Promise<{ subscription_id: string; job_id: string; status: string }>;
   getJob(id: string): Promise<JobStatus>;
   cancelJob(id: string): Promise<JobStatus>;
   getResults(id: string): Promise<SubscriptionResults>;

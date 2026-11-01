@@ -420,3 +420,24 @@ class JsonRefactorTests(unittest.TestCase):
         selected, skipped = SubscriptionRefreshService.select_speedtest_nodes_per_region([node(1).analyzed_node, node(2, name="other").analyzed_node], 1)
         self.assertEqual(len(selected), 1)
         self.assertEqual(len(skipped), 1)
+
+    def test_speed_refresh_request_passes_saved_node_mode(self):
+        sub = ApiStore.create_subscription("https://speed.example.test/sub")
+        job = {"id": "job_speed", "subscription_id": sub["id"], "status": "queued"}
+        with TestClient(app) as client, patch.object(SubscriptionRefreshService, "schedule_refresh", return_value=job) as schedule:
+            response = client.post(f"/subscriptions/{sub['id']}/refresh", json={"speedtest_limit": 2, "refetch_subscription": False})
+            self.assertEqual(response.status_code, 200)
+            schedule.assert_called_once_with(sub["id"], speedtest_limit=2, force_probe=False, refetch_subscription=False)
+
+    def test_speed_refresh_without_saved_nodes_requires_normal_refresh(self):
+        sub = ApiStore.create_subscription("https://speed.example.test/sub")
+        with TestClient(app) as client, patch.object(SubscriptionRefreshService, "fetch_subscription_text") as fetch:
+            for saved_nodes in (None, []):
+                with self.subTest(saved_nodes=saved_nodes):
+                    if saved_nodes is not None:
+                        ApiStore.save_results(sub["id"], saved_nodes)
+                    response = client.post(f"/subscriptions/{sub['id']}/refresh", json={"speedtest_limit": 1, "refetch_subscription": False})
+                    self.assertEqual(response.status_code, 409)
+                    self.assertIn("请先点击“刷新”", response.json()["detail"])
+                    self.assertIsNone(ApiStore.get_subscription(sub["id"])["last_job_id"])
+            fetch.assert_not_called()

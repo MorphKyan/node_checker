@@ -280,11 +280,16 @@ describe("App", () => {
     await waitFor(() => expect(screen.queryByText("Alpha")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: /订阅管理/ }));
-    const speedInput = await screen.findByTitle("每区域测速数量");
+    const speedInput = await screen.findByRole("spinbutton", { name: "每区域精测数量" });
+    expect(speedInput).toHaveAttribute("title", "决定每个区域参与精测的节点数量；大于 0 时所有有效节点先粗测，0 表示不测速。");
+    expect(screen.queryByLabelText("强制探测")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "节点" })).not.toBeInTheDocument();
     fireEvent.change(speedInput, { target: { value: "3" } });
-    fireEvent.click(screen.getByLabelText("强制探测"));
     fireEvent.click(screen.getByRole("button", { name: "测速刷新" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/subscriptions/sub_1/refresh") && String((init as RequestInit).body) === JSON.stringify({ speedtest_limit: 3, force_probe: true }))).toBe(true));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/subscriptions/sub_1/refresh") && String((init as RequestInit).body) === JSON.stringify({ speedtest_limit: 3, refetch_subscription: false }))).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: /订阅管理/ }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/subscriptions/sub_1/refresh") && String((init as RequestInit).body) === "{}")).toBe(true));
 
     const apiMutations = fetchMock.mock.calls.filter(([url, init]) => String(url).includes("api-sites") && (init as RequestInit).method !== "GET");
     expect(apiMutations.some(([, init]) => String((init as RequestInit).body).includes("clear_api_key"))).toBe(true);

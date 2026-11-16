@@ -3,6 +3,7 @@ import base64
 from contextlib import redirect_stdout
 from io import StringIO
 import unittest
+from unittest.mock import patch
 
 from aiohttp import web
 
@@ -109,6 +110,31 @@ class NodeParserTests(unittest.TestCase):
                     await NodeParser.fetch_subscription(f"http://127.0.0.1:{port}/sub")
             finally:
                 settings.SUBSCRIPTION_MAX_M = original_max_m
+                await runner.cleanup()
+
+        asyncio.run(run_case())
+
+    def test_subscription_download_has_its_own_timeout_and_clear_error(self):
+        async def run_case():
+            async def handler(request):
+                await asyncio.sleep(0.05)
+                return web.Response(text="vless://uuid@example.com:443")
+
+            app = web.Application()
+            app.router.add_get("/sub", handler)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, "127.0.0.1", 0)
+            await site.start()
+            url = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/sub?token=private"
+            try:
+                with patch.object(settings, "API_TIMEOUT", 0.001), patch.object(settings, "SUBSCRIPTION_TIMEOUT", 1):
+                    self.assertEqual(await NodeParser.fetch_subscription(url), "vless://uuid@example.com:443")
+                with patch.object(settings, "SUBSCRIPTION_TIMEOUT", 0.01):
+                    with self.assertRaisesRegex(ValueError, "Subscription download timed out after 0.01 seconds") as error:
+                        await NodeParser.fetch_subscription(url)
+                    self.assertNotIn("private", str(error.exception))
+            finally:
                 await runner.cleanup()
 
         asyncio.run(run_case())

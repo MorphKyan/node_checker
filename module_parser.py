@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import re
 import urllib.parse
@@ -24,32 +25,35 @@ class NodeParser:
 
     @staticmethod
     async def fetch_subscription(url: str) -> str:
-        timeout = aiohttp.ClientTimeout(total=settings.API_TIMEOUT)
+        timeout = aiohttp.ClientTimeout(total=settings.SUBSCRIPTION_TIMEOUT)
         max_bytes = max(1, int(settings.SUBSCRIPTION_MAX_M)) * 1024 * 1024
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as resp:
-                resp.raise_for_status()
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    try:
-                        content_length = int(content_length)
-                    except ValueError:
-                        content_length = 0
-                    if content_length > max_bytes:
-                        raise ValueError(f"Subscription response exceeds {max_bytes} bytes")
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    resp.raise_for_status()
+                    content_length = resp.headers.get("Content-Length")
+                    if content_length:
+                        try:
+                            content_length = int(content_length)
+                        except ValueError:
+                            content_length = 0
+                        if content_length > max_bytes:
+                            raise ValueError(f"Subscription response exceeds {max_bytes} bytes")
 
-                chunks = []
-                downloaded_bytes = 0
-                async for chunk in resp.content.iter_chunked(65536):
-                    downloaded_bytes += len(chunk)
-                    if downloaded_bytes > max_bytes:
-                        raise ValueError(
-                            f"Subscription response exceeds {max_bytes} bytes"
-                        )
-                    chunks.append(chunk)
+                    chunks = []
+                    downloaded_bytes = 0
+                    async for chunk in resp.content.iter_chunked(65536):
+                        downloaded_bytes += len(chunk)
+                        if downloaded_bytes > max_bytes:
+                            raise ValueError(
+                                f"Subscription response exceeds {max_bytes} bytes"
+                            )
+                        chunks.append(chunk)
 
-                encoding = resp.charset or "utf-8"
-                return b"".join(chunks).decode(encoding)
+                    encoding = resp.charset or "utf-8"
+                    return b"".join(chunks).decode(encoding)
+        except asyncio.TimeoutError as exc:
+            raise ValueError(f"Subscription download timed out after {settings.SUBSCRIPTION_TIMEOUT:g} seconds") from exc
 
     @staticmethod
     def _match_geo(remark: str) -> str:
@@ -82,7 +86,7 @@ class NodeParser:
             if transport_type == "grpc"
             else params.get("path", "")
         )
-        
+
         return VlessNode(
             raw_uri=line,
             uuid=uuid,
@@ -112,10 +116,10 @@ class NodeParser:
         insecure = str(insecure_raw).lower() in {"1", "true", "yes"}
         obfs = params.get("obfs", "")
         obfs_password = params.get("obfs-password") or params.get("obfs_password") or ""
-        
+
         up_val = params.get("up") or params.get("up_mbps")
         up_mbps = int(up_val) if up_val and str(up_val).isdigit() else None
-        
+
         down_val = params.get("down") or params.get("down_mbps")
         down_mbps = int(down_val) if down_val and str(down_val).isdigit() else None
 
@@ -215,5 +219,5 @@ class NodeParser:
                 nodes.append(parser(line))
             except ValueError:
                 print(f"[Parser] Failed to parse {scheme} line (invalid URI)")
-                
+
         return nodes

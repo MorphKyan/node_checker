@@ -1,4 +1,4 @@
-from models import ProxyNode, Hy2Node, SsNode
+from models import ProxyNode, Hy2Node, SsNode, TrojanNode
 from module_shadowsocks import singbox_shadowsocks_outbound
 
 
@@ -36,12 +36,15 @@ def singbox_outbound(node: ProxyNode, tag: str) -> dict:
             outbound["down_mbps"] = node.down_mbps
     else:
         outbound = {
-            "type": "vless",
+            "type": "trojan" if isinstance(node, TrojanNode) else "vless",
             "tag": tag,
             "server": node.server_ip,
             "server_port": node.server_port,
             "uuid": getattr(node, "uuid", ""),
         }
+        if isinstance(node, TrojanNode):
+            outbound.pop("uuid")
+            outbound["password"] = node.password
 
         if getattr(node, "flow", ""):
             outbound["flow"] = node.flow
@@ -50,7 +53,7 @@ def singbox_outbound(node: ProxyNode, tag: str) -> dict:
         if security in ["tls", "reality"]:
             tls_config = {
                 "enabled": True,
-                "insecure": False,
+                "insecure": getattr(node, "insecure", False),
                 "alpn": (
                     [item.strip() for item in node.alpn.split(",") if item.strip()]
                     if getattr(node, "alpn", "")

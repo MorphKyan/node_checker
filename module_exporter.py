@@ -2,7 +2,7 @@ import os
 import re
 from html import escape
 from pathlib import Path
-from models import TestedNode, Hy2Node, SsNode
+from models import TestedNode, Hy2Node, SsNode, TrojanNode
 from module_node_identity import make_node_fingerprint
 from module_subscription_exporter import SubscriptionExporter, get_visual_width
 
@@ -106,6 +106,13 @@ class ResultExporter:
 - **SNI**: `{getattr(an.node, "sni", "")}`
 - **Insecure**: `{getattr(an.node, "insecure", False)}`
 - **Obfs**: `{getattr(an.node, "obfs", "") or "None"}`"""
+            elif isinstance(an.node, TrojanNode):
+                basic_info_block = f"""- **Protocol**: `{node_protocol}`
+- **Server**: `{an.node.server_ip}:{an.node.server_port}`
+- **Expected Geo**: `{an.node.expected_geo}`
+- **Security**: `{an.node.security}`
+- **Transport**: `{an.node.type}`
+- **SNI**: `{an.node.sni}`"""
             else:
                 basic_info_block = f"""- **Protocol**: `{node_protocol}`
 - **UUID**: `{getattr(an.node, "uuid", "")}`

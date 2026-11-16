@@ -4,7 +4,7 @@ import shutil
 import subprocess
 import tempfile
 import asyncio
-from models import ProxyNode, Hy2Node, SsNode
+from models import ProxyNode, Hy2Node, SsNode, TrojanNode
 from module_shadowsocks import xray_shadowsocks_outbound
 from module_singbox_outbound import singbox_outbound
 from settings import settings
@@ -72,6 +72,12 @@ class TunnelController:
                 outbound["settings"]["vnext"][0]["users"][0]["flow"] = node.flow
 
             stream_settings = outbound["streamSettings"]
+            if isinstance(node, TrojanNode):
+                outbound.update(protocol="trojan", tag="trojan-out")
+                outbound["settings"] = {"servers": [{
+                    "address": node.server_ip, "port": node.server_port,
+                    "password": node.password,
+                }]}
 
             # TLS / Reality
             security = getattr(node, "security", "")
@@ -79,7 +85,7 @@ class TunnelController:
                 stream_settings["security"] = "tls"
                 stream_settings["tlsSettings"] = {
                     "serverName": getattr(node, "sni", ""),
-                    "allowInsecure": False
+                    "allowInsecure": getattr(node, "insecure", False)
                 }
                 if getattr(node, "fp", ""):
                     stream_settings["tlsSettings"]["fingerprint"] = node.fp

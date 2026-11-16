@@ -1,7 +1,7 @@
 import base64
 import re
 import urllib.parse
-from models import ProxyNode, VlessNode, Hy2Node, SsNode
+from models import ProxyNode, VlessNode, Hy2Node, SsNode, TrojanNode
 import aiohttp
 from settings import settings
 
@@ -136,6 +136,25 @@ class NodeParser:
         )
 
     @staticmethod
+    def parse_trojan_line(line: str) -> TrojanNode:
+        password, server_ip, server_port, params, remark = NodeParser._parse_endpoint(line)
+        security = params.get("security", "tls")
+        if not password or security not in {"tls", "none"}:
+            raise ValueError("Missing Trojan password or unsupported security")
+        transport = params.get("type", "tcp")
+        return TrojanNode(
+            raw_uri=line, password=urllib.parse.unquote(password),
+            server_ip=server_ip, server_port=server_port, remark=remark,
+            expected_geo=NodeParser._match_geo(remark), security=security,
+            sni=params.get("sni") or params.get("peer", ""),
+            alpn=params.get("alpn", ""), fp=params.get("fp", ""),
+            insecure=str(params.get("allowInsecure") or params.get("insecure") or "0").lower() in {"1", "true", "yes"},
+            type=transport,
+            path=(params.get("serviceName") or params.get("path", "")) if transport == "grpc" else params.get("path", ""),
+            host=params.get("host", ""), mode=params.get("mode", ""),
+        )
+
+    @staticmethod
     def parse_ss_line(line: str) -> SsNode:
         # SIP002 userinfo (Base64URL or percent-encoded) and legacy full Base64.
         main, _, fragment = line.partition('#')
@@ -179,6 +198,7 @@ class NodeParser:
             decoded = raw_text
 
         parsers = {
+            "trojan": NodeParser.parse_trojan_line,
             "ss": NodeParser.parse_ss_line,
             "vless": NodeParser.parse_vless_line,
             "hy2": NodeParser.parse_hy2_line,

@@ -1,11 +1,14 @@
 import hashlib
 import json
 
-from models import ProxyNode, Hy2Node, SsNode
+from models import ProxyNode, Hy2Node, SsNode, TrojanNode
 
 
 def make_node_fingerprint(node: ProxyNode) -> str:
-    if isinstance(node, SsNode):
+    if isinstance(node, TrojanNode):
+        identity = {key: value for key, value in vars(node).items()
+                    if key not in {"raw_uri", "remark", "expected_geo"}}
+    elif isinstance(node, SsNode):
         identity = {
             "protocol": "ss", "server_ip": node.server_ip, "server_port": node.server_port,
             "method": node.method, "password": node.password,

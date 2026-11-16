@@ -28,6 +28,20 @@ class VlessNode(ProxyNode):
     mode: str = ""
 
 @dataclass
+class TrojanNode(ProxyNode):
+    protocol: str = "trojan"
+    password: str = ""
+    security: str = "tls"
+    sni: str = ""
+    alpn: str = ""
+    fp: str = ""
+    insecure: bool = False
+    type: str = "tcp"
+    path: str = ""
+    host: str = ""
+    mode: str = ""
+
+@dataclass
 class SsNode(ProxyNode):
     protocol: str = "ss"
     method: str = ""

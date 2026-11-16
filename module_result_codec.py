@@ -1,12 +1,14 @@
 from dataclasses import fields
 
-from models import ApiVerdict, AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode, Hy2Node, ProxyNode, SsNode
+from models import ApiVerdict, AnalyzedNode, LabelEvidence, NodeProfile, ProbeData, TestedNode, VlessNode, Hy2Node, ProxyNode, SsNode, TrojanNode
 
 
 def restore_proxy_node(node_data: dict) -> ProxyNode:
     protocol = node_data.get("protocol", "")
     raw_uri = node_data.get("raw_uri", "")
-    if protocol == "ss" or raw_uri.startswith("ss://"):
+    if protocol == "trojan" or raw_uri.startswith("trojan://"):
+        node_type = TrojanNode
+    elif protocol == "ss" or raw_uri.startswith("ss://"):
         node_type = SsNode
     elif protocol in {"hy2", "hysteria2"} or raw_uri.startswith("hy2://") or raw_uri.startswith("hysteria2://"):
         node_type = Hy2Node

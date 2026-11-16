@@ -37,7 +37,7 @@ SG
 
 ## 功能概览
 
-- 解析 VLESS、Hysteria2（hy2 / hysteria2）和 Shadowsocks（ss）订阅，支持混合明文 URI 列表和 base64 订阅内容。
+- 解析 VLESS、Trojan、Hysteria2（hy2 / hysteria2）和 Shadowsocks（ss）订阅，支持混合明文 URI 列表和 base64 订阅内容。
 - SS 支持 SIP002（Base64URL 或明文转义凭据）、旧版整段 Base64、IPv6 和 SS2022；可通过 Xray / sing-box 检测，并导出 Base64 增强订阅。SIP003 插件参数保留并传给 sing-box，Xray 遇到插件会明确拒绝。
 - VLESS 的 TCP、WebSocket、gRPC 可用于两种内核；XHTTP 使用 Xray 检测，sing-box 检测不支持 XHTTP，不会静默转换为 TCP；Base64 订阅保留原始连接参数。
 - Hysteria2 的混淆、上下行带宽和 `ports` 端口跳跃参数由 sing-box 保留；Xray 检测遇到这些参数会明确拒绝，请选用 sing-box。
